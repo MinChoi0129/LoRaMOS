@@ -1,0 +1,14 @@
+numpy==2.0.2
+wandb==0.25.0
+pyyaml==6.0.3
+opencv-python
+opencv-contrib-python
+timm
+scikit-image
+scipy
+matplotlib
+scikit-learn
+ipykernel
+tqdm
+pillow
+tqdm
