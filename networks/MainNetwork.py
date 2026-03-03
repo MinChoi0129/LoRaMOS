@@ -66,24 +66,24 @@ class FarMOS(nn.Module):
             pred = pred.view(B, C, -1).unsqueeze(-1)
             label = label.view(B, -1).unsqueeze(-1)
 
-            l_nll = self.moving_nll_loss(F.log_softmax(pred, dim=1).double(), label.long()).float()
-            l_lovasz = self.lovasz_loss(F.softmax(pred, dim=1), label.long(), ignore=0)
+            l_nll = self.moving_nll_loss(F.log_softmax(pred, dim=1).double(), label).float()
+            l_lovasz = self.lovasz_loss(pred, label.long(), ignore=0)
 
             return l_nll + l_lovasz
 
         elif mode == "movable":
-            l_nll = self.movable_nll_loss(F.log_softmax(pred, dim=1).double(), label.long()).float()
-            l_lovasz = self.lovasz_loss(F.softmax(pred, dim=1), label.long(), ignore=0)
+            l_nll = self.movable_nll_loss(F.log_softmax(pred, dim=1).double(), label).float()
+            l_lovasz = self.lovasz_loss(pred, label.long(), ignore=0)
 
             return l_nll + l_lovasz
 
     def infer(self, xyzi, des_coord, sph_coord, rv_input):
-        """
-        xyzi: [B, T, 7, N, 1]
-        des_coord: [B, T, N, 3, 1]
-        sph_coord: [B, T, N, 3, 1]
-        rv_input: [B, 5, 64, 2048]
-        """
+        # """
+        # xyzi: [B, T, 7, N, 1]
+        # des_coord: [B, T, N, 3, 1]
+        # sph_coord: [B, T, N, 3, 1]
+        # rv_input: [B, 5, 64, 2048]
+        # """
         B, T, C, N, _ = xyzi.shape
 
         # **************** [ Step 1: Point Feature 추출 ] ****************
@@ -111,25 +111,28 @@ class FarMOS(nn.Module):
         # **************** [ Step 3: 누적형 Point Feature -> BEV Feature ] ****************
         bev_input = self.project_to_bev(pcd_feat, des_coord)  # [B, 192, H=512, W=512]
 
-        # **************** [ Step 4: Semantic 예측 및 중간-2D-Feature를 3D로 복원 ] ****************
+        # # **************** [ Step 4: Semantic 예측 및 중간-2D-Feature를 3D로 복원 ] ****************
         movable_logit_2d = self.movable_rv_net(rv_input)  # [B, K=3, H=64, W=2048]
         movable_logit_as_3d = self.unproject_from_full(movable_logit_2d, rv_coords_t0)  # [B, K=3, N, 1]
 
         # **************** [ Step 5: BEV Semantic Supervision 생성 및 BEV 피쳐 생성 ] ****************
         movable_logit_as_bev = self.project_to_bev(movable_logit_as_3d, des_coord_t0)  # [B, K=3, 512, 512]
         movable_probability_as_bev = torch.softmax(movable_logit_as_bev, dim=1)  # [B, K=3, 512, 512]
-        movable_probability_mask_bev = movable_probability_as_bev[:, 2:3, :, :]  # [B, p=1, 512, 512] => 객체 존재 확률
+        movable_probability_mask_bev = movable_probability_as_bev[
+            :, 2:3, :, :
+        ].detach()  # [B, p=1, 512, 512] => 객체 존재 확률
         moving_feat_2d = self.moving_bev_net(bev_input, movable_probability_mask_bev)  # [B, C=32, H=256, W=256]
 
         # **************** [ Step 6: 3차원 피처 모두 융합 ] ****************
         moving_feat_3d = self.unproject_from_half(moving_feat_2d, bev_coord_t0)  # [B, C=32, N, 1]
-        moving_logit_3d = self.point_fuse(pcd_feat_t0, moving_feat_3d, movable_logit_as_3d)  # [B, K=3, N, 1]
+        moving_logit_3d = self.point_fuse(pcd_feat_t0, moving_feat_3d, movable_logit_as_3d.detach())  # [B, K=3, N, 1]
 
         RUN_SAVE_FEATURE = False
         if RUN_SAVE_FEATURE:
             save_feature_as_img([], [""], "max")
 
         return moving_logit_3d, movable_logit_2d
+        # return torch.rand(B, 3, N, 1).cuda(), movable_logit_2d
 
     def forward(
         self,
@@ -145,6 +148,7 @@ class FarMOS(nn.Module):
         loss_moving = self.get_loss(moving_logit_3d, current_moving_label_3d, mode="moving")
         loss_movable = self.get_loss(movable_logit_2d, current_movable_label_2d, mode="movable")
         loss = loss_moving + loss_movable
+        # loss = loss_movable
 
         return {
             "loss": loss,

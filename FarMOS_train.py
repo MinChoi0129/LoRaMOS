@@ -39,9 +39,14 @@ def validate(model, val_loader):
     with torch.no_grad():
         for batch in tqdm(val_loader, desc="  Val", dynamic_ncols=True):
             xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid, _, _ = batch
-            xyzi, des_coord, sph_coord = xyzi.cuda(), des_coord.cuda(), sph_coord.cuda()
-            rv_input = rv_input.cuda()
-            label_3d, label_2d = label_3d.cuda(), label_2d.cuda()
+            xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d = (
+                xyzi.cuda(),
+                des_coord.cuda(),
+                sph_coord.cuda(),
+                rv_input.cuda(),
+                label_3d.cuda(),
+                label_2d.cuda(),
+            )
 
             out = model(xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d)
             total_loss += out["loss"].item()
@@ -62,16 +67,16 @@ def validate(model, val_loader):
             for b in range(movable_pred.shape[0]):
                 movable_evaluator.addBatch(movable_pred[b].flatten(), movable_gt[b].flatten().astype(np.int32))
 
-    moving_iou = moving_evaluator.getIoU()
-    movable_iou = movable_evaluator.getIoU()
+    _, moving_iou = moving_evaluator.getIoU()
+    _, movable_iou = movable_evaluator.getIoU()
     return {
         "loss": total_loss / n,
         "loss_moving": total_mov / n,
         "loss_movable": total_mbl / n,
-        "iou_static": moving_iou[1],
-        "iou_moving": moving_iou[2],
-        "iou_immovable": movable_iou[1],
-        "iou_movable": movable_iou[2],
+        "iou_static": moving_iou[1].item(),
+        "iou_moving": moving_iou[2].item(),
+        "iou_immovable": movable_iou[1].item(),
+        "iou_movable": movable_iou[2].item(),
     }
 
 

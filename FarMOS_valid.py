@@ -84,8 +84,8 @@ def run_val(args, model, task_cfg):
                         reval.addBatch(pred_v[rmask], gt_v[rmask])
 
     # Print results
-    moving_iou = moving_evaluator.getIoU()
-    movable_iou = movable_evaluator.getIoU()
+    _, moving_iou = moving_evaluator.getIoU()
+    _, movable_iou = movable_evaluator.getIoU()
     print("\n" + "=" * 60)
     print("  Validation Results")
     print("=" * 60)
@@ -93,21 +93,21 @@ def run_val(args, model, task_cfg):
     for i in range(n_classes):
         if i not in ignore:
             name = {1: "static", 2: "moving"}
-            print(f"    IoU {name.get(i, i):>10s}: {moving_iou[i]:.6f}")
+            print(f"    IoU {name.get(i, i):>10s}: {moving_iou[i].item():.6f}")
 
     print("  [Movable (RV)]")
     for i in range(n_classes):
         if i not in ignore:
             name = {1: "immovable", 2: "movable"}
-            print(f"    IoU {name.get(i, i):>10s}: {movable_iou[i]:.6f}")
+            print(f"    IoU {name.get(i, i):>10s}: {movable_iou[i].item():.6f}")
 
     print("-" * 60)
     print("  Range-wise Moving IoU:")
     print(f"  {'Range':>10s} | {'iou_static':>12s} | {'iou_moving':>12s}")
     print("-" * 44)
     for (rmin, rmax), reval in range_evaluators.items():
-        r = reval.getIoU()
-        print(f"  {rmin:>2d}-{rmax:>2d}m    | {r[1]:>12.6f} | {r[2]:>12.6f}")
+        _, r = reval.getIoU()
+        print(f"  {rmin:>2d}-{rmax:>2d}m    | {r[1].item():>12.6f} | {r[2].item():>12.6f}")
     print("=" * 60)
 
 
