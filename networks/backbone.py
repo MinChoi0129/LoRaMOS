@@ -59,6 +59,42 @@ def get_module(param_dic, **kwargs):
     return result_module
 
 
+class MetaKernel(nn.Module):
+    def __init__(self, in_ch, out_ch, coord_ch=5, kernel_size=3):
+        super(MetaKernel, self).__init__()
+        self.k2 = kernel_size * kernel_size
+
+        # 기하학적 특징(상대적 거리)을 가중치로 변환하는 MLP
+        self.mlp = nn.Sequential(
+            nn.Conv2d(coord_ch, 16, kernel_size=1),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(16, in_ch, kernel_size=1),
+        )
+        # 가중치가 적용된 주변 9개 영역을 하나로 병합
+        self.reduction = nn.Conv2d(in_ch * self.k2, out_ch, kernel_size=1)
+
+    def forward(self, x, coord):
+        B, C, H, W = x.shape
+
+        # 1. 주변 좌표 및 피처 샘플링 (Unfold)
+        # coord_unfold: [B, coord_ch, 9, H, W], x_unfold: [B, C, 9, H, W]
+        coord_unfold = F.unfold(coord, 3, padding=1).view(B, -1, self.k2, H, W)
+        x_unfold = F.unfold(x, 3, padding=1).view(B, C, self.k2, H, W)
+
+        # 2. Relative Coordinates (MF-MOS 핵심: 주변 - 중심)
+        # coord[:, :, None, :, :]는 중심점의 좌표를 9개 영역에 맞춰 확장한 것
+        rel_coord = coord_unfold - coord[:, :, None, :, :]
+
+        # 3. 가중치 생성 (MLP는 픽셀 단위로 작동해야 하므로 4D로 잠시 변환)
+        # [B, coord_ch, 9, H, W] -> [B, coord_ch, 9*H*W, 1]
+        weights = self.mlp(rel_coord.view(B, -1, self.k2 * H * W, 1))
+        weights = torch.sigmoid(weights).view(B, C, self.k2, H, W)
+
+        # 4. 가중치 적용 및 병합
+        out = (x_unfold * weights).view(B, C * self.k2, H, W)
+        return self.reduction(out)
+
+
 class TConv(nn.Module):
     def __init__(self, T, cin, cout):
         super(TConv, self).__init__()
@@ -400,9 +436,7 @@ class CatFusion(nn.Module):
             nn.Conv2d(s, s // 2, kernel_size=1, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(s // 2),
             act_layer,
-            nn.Conv2d(s // 2, out_channel, kernel_size=1, stride=1, padding=0, bias=False),
-            nn.BatchNorm2d(out_channel),
-            act_layer,
+            nn.Conv2d(s // 2, out_channel, kernel_size=1, stride=1, padding=0, bias=True),
         )
 
     def forward(self, *x_list):
@@ -454,23 +488,6 @@ class PointAttFusion(nn.Module):
         return x_out
 
 
-# class BilinearSample(nn.Module):
-#     def __init__(self, scale_rate):
-#         super(BilinearSample, self).__init__()
-#         self.scale_rate = scale_rate
-
-#     def forward(self, grid_feat, grid_coord):
-#         H = grid_feat.shape[2]
-#         W = grid_feat.shape[3]
-
-#         grid_sample_x = (2 * grid_coord[:, :, 1] * self.scale_rate[1] / (W - 1)) - 1
-#         grid_sample_y = (2 * grid_coord[:, :, 0] * self.scale_rate[0] / (H - 1)) - 1
-
-#         grid_sample_2 = torch.stack((grid_sample_x, grid_sample_y), dim=-1)
-#         pc_feat = F.grid_sample(grid_feat, grid_sample_2, mode="bilinear", padding_mode="zeros", align_corners=True)
-#         return pc_feat
-
-
 class BilinearSample(nn.Module):
     def __init__(self, scale_rate):
         super(BilinearSample, self).__init__()
@@ -486,43 +503,3 @@ class BilinearSample(nn.Module):
         grid_sample_2 = torch.stack((grid_sample_x, grid_sample_y), dim=-1)
         pc_feat = F.grid_sample(grid_feat, grid_sample_2, mode="bilinear", padding_mode="zeros", align_corners=True)
         return pc_feat
-
-
-class SemanticGuidedAttention(nn.Module):
-    def __init__(self, bev_ch, rv_ch):
-        super(SemanticGuidedAttention, self).__init__()
-
-        # 1. RV(Semantic)로부터 2D 공간 지도(어디가 객체인가?)를 뽑아냅니다.
-        self.spatial_gate = nn.Sequential(nn.Conv2d(rv_ch, 1, kernel_size=1, bias=True), nn.Sigmoid())
-
-        # 2. 채널 어텐션을 위한 풀링 및 Softmax + Scaling 트릭
-        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.channel_gate = nn.Sequential(nn.Conv2d(bev_ch, bev_ch, kernel_size=1, bias=True), nn.Softmax(dim=1))
-
-        # 3. 최종 병합용 Conv
-        self.merge_conv = nn.Sequential(
-            nn.Conv2d(bev_ch + rv_ch, bev_ch, kernel_size=1, bias=False), nn.BatchNorm2d(bev_ch), nn.ReLU(inplace=True)
-        )
-
-    def forward(self, bev_feat, rv_feat):
-        """
-        bev_feat: 모션/Flow 정보 (예: 64 채널)
-        rv_feat: 2d-3d-2d를 거쳐 넘어온 RV Semantic 정보 (예: 128 채널)
-        """
-        # Step 1: Spatial Guidance (RV가 BEV를 가이드)
-        # RV에서 0~1 사이의 확률맵(차량/보행자 위치)을 추출해 BEV에 곱함
-        # -> 배경 노이즈의 움직임(나무 흔들림 등)이 0으로 삭제됨!
-        s_map = self.spatial_gate(rv_feat)
-        spatially_attended_bev = bev_feat * s_map
-
-        # Step 2: Channel Guidance
-        # 노이즈가 제거된 깨끗한 BEV 피처에서 중요한 모션 채널을 추출
-        c_vec = self.avg_pool(spatially_attended_bev)
-        c_map = self.channel_gate(c_vec) * bev_feat.shape[1]  # Softmax Scale 트릭 유지
-        attended_bev = spatially_attended_bev * c_map
-
-        # Step 3: Residual Connection & Merge
-        # 어텐션된 BEV에 원본 BEV를 더해주고(Res), 다시 RV와 Concat하여 최종 압축
-        out = self.merge_conv(torch.cat([attended_bev + bev_feat, rv_feat], dim=1))
-
-        return out

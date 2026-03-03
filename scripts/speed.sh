@@ -13,7 +13,7 @@ NUM_ITERS=2000
 
 # ============================================================
 
-python FarMOS_speed_or_vis.py \
+python FarMOS_speed.py \
     --sequence_dir ${SEQUENCE_DIR} \
     --warmup_iters ${WARMUP_ITERS} \
     --num_iters ${NUM_ITERS}

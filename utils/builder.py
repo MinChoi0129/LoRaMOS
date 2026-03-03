@@ -1,3 +1,4 @@
+from functools import partial
 import os
 import shutil
 import torch
@@ -19,7 +20,11 @@ def build_optimizer(cfg, model):
         return torch.optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
     elif name == "sgd":
         return torch.optim.SGD(
-            model.parameters(), lr=cfg["lr"], momentum=cfg["momentum"], weight_decay=cfg["weight_decay"]
+            model.parameters(),
+            lr=cfg["lr"],
+            momentum=cfg["momentum"],
+            weight_decay=cfg["weight_decay"],
+            nesterov=cfg["nesterov"],
         )
     else:
         raise ValueError(f"Unknown optimizer: {name}")
@@ -30,7 +35,28 @@ def build_scheduler(cfg, optimizer):
     if name == "cosine":
         return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg["epochs"])
     elif name == "step":
-        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=cfg["step_size"], gamma=cfg["step_gamma"])
+        import math
+
+        num_epoch = cfg["epochs"] - cfg["begin_epoch"]
+
+        def schedule_with_warmup(epoch, num_epoch, pct_start, step, decay_factor):
+            warmup_epochs = int(num_epoch * pct_start)
+            if epoch < warmup_epochs:
+                return (epoch + 1) / warmup_epochs
+            else:
+                step_idx = epoch // step
+                return math.pow(decay_factor, step_idx)
+
+        return torch.optim.lr_scheduler.LambdaLR(
+            optimizer,
+            lr_lambda=partial(
+                schedule_with_warmup,
+                num_epoch=num_epoch,
+                pct_start=cfg["pct_start"],
+                step=cfg["step"],
+                decay_factor=cfg["decay_factor"],
+            ),
+        )
     else:
         raise ValueError(f"Unknown scheduler: {name}")
 
@@ -60,17 +86,6 @@ def build_val_loader(sequence_dir, num_workers=4):
 def build_test_loader(sequence_dir, seq_num, batch_size=1, num_workers=4):
     dataset = DataloadTest(sequence_dir, seq_num)
     return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
-
-
-# ============================================================
-# Inference
-# ============================================================
-
-
-def predict(model, xyzi, des_coord, sph_coord):
-    """model.infer -> argmax -> numpy [B, N]"""
-    moving_logit_3d, _ = model.infer(xyzi, des_coord, sph_coord)
-    return moving_logit_3d.squeeze(-1).argmax(dim=1).cpu().numpy()
 
 
 # ============================================================

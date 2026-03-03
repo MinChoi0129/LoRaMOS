@@ -7,14 +7,14 @@ sequence_dir: "/home/ssd_data/ROOT_KITTI/KITTI/dataset/sequences/"
 dataset_config: "config/semantic-kitti-mos.yaml"
 
 # DataLoader
-batch_size: 4
+batch_size: 6
 num_workers: 8
 
 # Wandb
 wandb_project: "FarMOS"
 
 ######################################################################
-# Case 1: Standard Modern Setup (AdamW)
+# # Case 1: Standard Modern Setup (AdamW)
 optimizer: "adamw"
 lr: 0.001                # 1e-3
 weight_decay: 0.01       # AdamW에서는 0.01 ~ 0.05 권장
@@ -23,11 +23,18 @@ epochs: 100
 ######################################################################
 # # Case 2: High Generalization Setup (SGD)
 # optimizer: "sgd"
-# lr: 0.01                 # SGD는 Adam보다 큰 lr 필요
-# weight_decay: 0.0001     # 1e-4
-# momentum: 0.9            # 필수 설정 (Nesterov 가속 효과)
-# scheduler: "cosine"
-# epochs: 100
+# lr: 0.02               
+# momentum: 0.9 
+# nesterov: True
+# weight_decay: 0.001
+
+# scheduler: "step"
+# begin_epoch: 0
+# pct_start: 0.01            # warmup 비율 (70 * 0.01 ≈ 1 에폭 linear warmup)
+# step: 10                   # 매 10 에폭마다 lr 감소
+# decay_factor: 0.1          # 감소 비율 (lr *= 0.1)
+# epochs: 70
+
 ######################################################################
 # # Case 3: Stable Step-down Setup (Adam)
 # optimizer: "adam"

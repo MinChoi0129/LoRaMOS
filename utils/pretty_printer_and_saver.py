@@ -28,11 +28,11 @@ def save_feature_as_img(variables, variable_names, channel_pool="max"):
         try:  # feature
             if channel_pool == "mean":
                 channel_mean = np.mean(single_batch, axis=0)
-                plt.imsave(f"{save_dir}/{variable_name}.png", channel_mean)
+                plt.imsave(f"{save_dir}/{variable_name}.png", channel_mean, cmap="viridis")
             elif channel_pool == "max":
                 channel_max = np.max(single_batch, axis=0)
-                plt.imsave(f"{save_dir}/{variable_name}.png", channel_max)
+                plt.imsave(f"{save_dir}/{variable_name}.png", channel_max, cmap="viridis")
             else:
                 raise ValueError(f"Invalid channel_pool value: {channel_pool}")
-        except:  # label
-            plt.imsave(f"{save_dir}/{variable_name}.png", single_batch)
+        except:  # label/pred (class 0, 1, 2)
+            plt.imsave(f"{save_dir}/{variable_name}.png", single_batch, cmap="viridis", vmin=0, vmax=2)

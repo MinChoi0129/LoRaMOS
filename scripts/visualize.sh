@@ -6,8 +6,8 @@
 
 # Dataset
 SEQUENCE_DIR="/home/ssd_data/ROOT_KITTI/KITTI/dataset/sequences/"
-FRAME_ID=4017
-CHECKPOINT="logs/Exp01/checkpoints/best_68.pth"
+FRAME_ID=4000
+CHECKPOINT="logs/Exp11/checkpoints/best_4.pth"
 
 # ============================================================
 

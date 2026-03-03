@@ -24,23 +24,25 @@ if __name__ == "__main__":
 
     # Load real data once from dataloader
     print("Loading sample from dataloader...")
-    xyzi, des_coord, sph_coord, _, _, _, _, _ = dataset[4017]
+    xyzi, des_coord, sph_coord, rv_input, _, _, _, _, _ = dataset[4017]
 
     # Add batch dimension
     xyzi = xyzi.unsqueeze(0).to(device)
     des_coord = des_coord.unsqueeze(0).to(device)
     sph_coord = sph_coord.unsqueeze(0).to(device)
-
-    print(f"xyzi: {xyzi.shape}, des_coord: {des_coord.shape}, sph_coord: {sph_coord.shape}")
+    rv_input = rv_input.unsqueeze(0).to(device)
 
     # Model
     model = FarMOS().to(device)
     model.eval()
 
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Trainable parameters: {num_params:,}")
+
     # Warmup
     for _ in tqdm(range(args.warmup_iters), desc="Warmup"):
         with torch.no_grad():
-            model.infer(xyzi, des_coord, sph_coord)
+            model.infer(xyzi, des_coord, sph_coord, rv_input)
     torch.cuda.synchronize()
 
     # Benchmark
@@ -51,7 +53,7 @@ if __name__ == "__main__":
         t0 = time.perf_counter()
 
         with torch.no_grad():
-            model.infer(xyzi, des_coord, sph_coord)
+            model.infer(xyzi, des_coord, sph_coord, rv_input)
 
         torch.cuda.synchronize()
         t1 = time.perf_counter()

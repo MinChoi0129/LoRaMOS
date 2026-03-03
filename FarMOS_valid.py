@@ -8,7 +8,7 @@ from tqdm import tqdm
 from networks.MainNetwork import FarMOS
 from utils.metrics import iouEval
 from utils.checkpoint import load_checkpoint
-from utils.builder import build_val_loader, build_test_loader, predict
+from utils.builder import build_val_loader, build_test_loader
 
 
 def get_args():
@@ -42,7 +42,8 @@ def run_val(args, model, task_cfg):
     n_classes = len(inv_map)
 
     val_loader = build_val_loader(args.sequence_dir, args.num_workers)
-    evaluator = iouEval(n_classes, ignore)
+    moving_evaluator = iouEval(n_classes, ignore)
+    movable_evaluator = iouEval(n_classes, ignore)
     range_bins = [(0, 10), (10, 20), (20, 30), (30, 40), (40, 50)]
     range_evaluators = {r: iouEval(n_classes, ignore) for r in range_bins}
 
@@ -51,20 +52,25 @@ def run_val(args, model, task_cfg):
     model.eval()
     with torch.no_grad():
         for batch in tqdm(val_loader, desc="Val", dynamic_ncols=True):
-            xyzi, des_coord, sph_coord, label_3d, _, num_valid, seq_ids, file_ids = batch
+            xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid, seq_ids, file_ids = batch
             xyzi, des_coord, sph_coord = xyzi.cuda(), des_coord.cuda(), sph_coord.cuda()
+            rv_input = rv_input.cuda()
 
-            pred_cls = predict(model, xyzi, des_coord, sph_coord)
+            moving_logit_3d, movable_logit_2d = model.infer(xyzi, des_coord, sph_coord, rv_input)
+            moving_pred = moving_logit_3d.squeeze(-1).argmax(dim=1).cpu().numpy()
+            movable_pred = movable_logit_2d.argmax(dim=1).cpu().numpy()
+            movable_gt = label_2d.numpy().astype(np.int32)
 
-            for b in range(pred_cls.shape[0]):
+            for b in range(moving_pred.shape[0]):
                 nv = num_valid[b].item()
                 sid, fid = seq_ids[b], file_ids[b]
 
-                save_predictions(pred_cls[b], nv, sid, fid, args.pred_dir, inv_map)
+                save_predictions(moving_pred[b], nv, sid, fid, args.pred_dir, inv_map)
 
-                pred_v = pred_cls[b][:nv]
+                pred_v = moving_pred[b][:nv]
                 gt_v = label_3d[b][:nv].numpy().astype(np.int32)
-                evaluator.addBatch(pred_v, gt_v)
+                moving_evaluator.addBatch(pred_v, gt_v)
+                movable_evaluator.addBatch(movable_pred[b].flatten(), movable_gt[b].flatten())
 
                 # Range-wise evaluation
                 pc_xyz = np.fromfile(
@@ -78,17 +84,25 @@ def run_val(args, model, task_cfg):
                         reval.addBatch(pred_v[rmask], gt_v[rmask])
 
     # Print results
-    iou = evaluator.getIoU()
+    moving_iou = moving_evaluator.getIoU()
+    movable_iou = movable_evaluator.getIoU()
     print("\n" + "=" * 60)
     print("  Validation Results")
     print("=" * 60)
+    print("  [Moving (3D)]")
     for i in range(n_classes):
         if i not in ignore:
-            name = {0: "unlabeled", 1: "static", 2: "moving"}
-            print(f"  IoU {name.get(i, i):>10s}: {iou[i]:.6f}")
+            name = {1: "static", 2: "moving"}
+            print(f"    IoU {name.get(i, i):>10s}: {moving_iou[i]:.6f}")
+
+    print("  [Movable (RV)]")
+    for i in range(n_classes):
+        if i not in ignore:
+            name = {1: "immovable", 2: "movable"}
+            print(f"    IoU {name.get(i, i):>10s}: {movable_iou[i]:.6f}")
 
     print("-" * 60)
-    print("  Range-wise IoU:")
+    print("  Range-wise Moving IoU:")
     print(f"  {'Range':>10s} | {'iou_static':>12s} | {'iou_moving':>12s}")
     print("-" * 44)
     for (rmin, rmax), reval in range_evaluators.items():
@@ -107,10 +121,12 @@ def run_test(args, model, task_cfg):
             seq_id = str(seq_num).zfill(2)
 
             for batch in tqdm(test_loader, desc=f"Test seq {seq_id}", dynamic_ncols=True):
-                xyzi, des_coord, sph_coord, num_valid, seq_ids, file_ids = batch
+                xyzi, des_coord, sph_coord, rv_input, num_valid, seq_ids, file_ids = batch
                 xyzi, des_coord, sph_coord = xyzi.cuda(), des_coord.cuda(), sph_coord.cuda()
+                rv_input = rv_input.cuda()
 
-                pred_cls = predict(model, xyzi, des_coord, sph_coord)
+                moving_logit_3d, _ = model.infer(xyzi, des_coord, sph_coord, rv_input)
+                pred_cls = moving_logit_3d.squeeze(-1).argmax(dim=1).cpu().numpy()
 
                 for b in range(pred_cls.shape[0]):
                     save_predictions(pred_cls[b], num_valid[b].item(), seq_ids[b], file_ids[b], args.pred_dir, inv_map)

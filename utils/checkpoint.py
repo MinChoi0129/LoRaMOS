@@ -10,13 +10,16 @@ def _strip_compile_prefix(state_dict):
 
 def save_checkpoint(model, optimizer, scheduler, epoch, path, best_moving_iou=0.0):
     """Save checkpoint with clean (non-compiled) state_dict keys."""
-    torch.save({
-        "epoch": epoch,
-        "model_state_dict": _strip_compile_prefix(model.state_dict()),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "scheduler_state_dict": scheduler.state_dict(),
-        "best_moving_iou": best_moving_iou,
-    }, path)
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": _strip_compile_prefix(model.state_dict()),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "best_moving_iou": best_moving_iou,
+        },
+        path,
+    )
 
 
 def load_checkpoint(model, path, device="cuda"):
@@ -33,8 +36,7 @@ def load_checkpoint(model, path, device="cuda"):
     return ckpt
 
 
-def save_best_checkpoint(model, optimizer, scheduler, epoch, ckpt_dir,
-                         current_iou, best_iou, logger=None):
+def save_best_checkpoint(model, optimizer, scheduler, epoch, ckpt_dir, current_iou, best_iou, logger=None):
     """Save best model if current_iou > best_iou. Returns updated best_iou."""
     if current_iou <= best_iou:
         return best_iou
@@ -49,6 +51,6 @@ def save_best_checkpoint(model, optimizer, scheduler, epoch, ckpt_dir,
     save_checkpoint(model, optimizer, scheduler, epoch, best_path, best_iou)
 
     if logger:
-        logger.log(f"  -> New best model saved: {best_path} (iou_moving: {best_iou:.4f})")
+        logger.log(f"  -> New best model saved: {best_path} (iou_moving: {best_iou:.6f})")
 
     return best_iou

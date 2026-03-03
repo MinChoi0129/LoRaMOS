@@ -179,22 +179,57 @@ def make_point_features(points_xyzi, cartesian_coords):
 def generate_rv_label(spherical_coord_t0, label_t0, rv_height=64, rv_width=2048):
     """
     현재 프레임의 3D 레이블 → Range View 2D 레이블로 scatter
-    중복 셀은 max 적용 (moving=2 > static=1 > unlabeled=0)
+    중복 셀은 최소 거리(nearest point) 기준으로 결정 (Painter's algorithm)
     """
     label_2d = np.zeros((rv_height, rv_width), dtype=np.int64)
 
     theta_idx = np.floor(spherical_coord_t0[:, 0]).astype(np.int64)
     phi_idx = np.floor(spherical_coord_t0[:, 1]).astype(np.int64)
+    depth = spherical_coord_t0[:, 2]  # r_quan (range)
 
     valid = (theta_idx >= 0) & (theta_idx < rv_height) & (phi_idx >= 0) & (phi_idx < rv_width)
+    valid_idx = np.where(valid)[0]
 
-    np.maximum.at(
-        label_2d,
-        (theta_idx[valid], phi_idx[valid]),
-        label_t0[valid].astype(np.int64),
-    )
+    # 먼 포인트 먼저, 가까운 포인트가 덮어씀 → 최종 레이블은 가장 가까운 포인트의 것
+    order = np.argsort(-depth[valid_idx])
+    sorted_idx = valid_idx[order]
+
+    label_2d[theta_idx[sorted_idx], phi_idx[sorted_idx]] = label_t0[sorted_idx].astype(np.int64)
 
     return label_2d
+
+
+def generate_rv_features(points_xyzi_t0, spherical_coord_t0, rv_height=64, rv_width=2048):
+    """
+    현재 프레임의 3D 포인트 → Range View 2D 피처맵 (Painter's algorithm)
+    각 픽셀은 가장 가까운 포인트의 [x, y, z, intensity, range] 값 사용
+    (generate_rv_label과 동일한 nearest-point 기준)
+    Returns: [5, rv_height, rv_width]
+    """
+    rv_features = np.zeros((5, rv_height, rv_width), dtype=np.float32)
+
+    theta_idx = np.floor(spherical_coord_t0[:, 0]).astype(np.int64)
+    phi_idx = np.floor(spherical_coord_t0[:, 1]).astype(np.int64)
+    depth = spherical_coord_t0[:, 2]
+
+    valid = (theta_idx >= 0) & (theta_idx < rv_height) & (phi_idx >= 0) & (phi_idx < rv_width)
+    valid_idx = np.where(valid)[0]
+
+    # Painter's algorithm: 먼 포인트 먼저, 가까운 포인트가 덮어씀
+    order = np.argsort(-depth[valid_idx])
+    sorted_idx = valid_idx[order]
+
+    th = theta_idx[sorted_idx]
+    ph = phi_idx[sorted_idx]
+
+    x, y, z = points_xyzi_t0[:, 0], points_xyzi_t0[:, 1], points_xyzi_t0[:, 2]
+    rv_features[0, th, ph] = x[sorted_idx]
+    rv_features[1, th, ph] = y[sorted_idx]
+    rv_features[2, th, ph] = z[sorted_idx]
+    rv_features[3, th, ph] = points_xyzi_t0[sorted_idx, 3]
+    rv_features[4, th, ph] = np.sqrt(x[sorted_idx] ** 2 + y[sorted_idx] ** 2 + z[sorted_idx] ** 2) + 1e-12
+
+    return rv_features
 
 
 # ============================================================
@@ -208,14 +243,18 @@ class DataAugment:
         noise_mean=0,
         noise_std=0.01,
         theta_range=(-180, 180),
-        shift_range=((-3, 3), (-3, 3), (-0.4, 0.4)),
+        shift_range=((0, 0), (0, 0), (0, 0)),
         size_range=(0.95, 1.05),
+        flip_x=True,
+        flip_y=True,
     ):
         self.noise_mean = noise_mean
         self.noise_std = noise_std
         self.theta_range = theta_range
         self.shift_range = shift_range
         self.size_range = size_range
+        self.flip_x = flip_x
+        self.flip_y = flip_y
 
     def __call__(self, points):
         """
@@ -235,10 +274,10 @@ class DataAugment:
         scale = random.uniform(self.size_range[0], self.size_range[1])
         points[:, :3] *= scale
 
-        # Random flip on XY plane
-        if random.random() < 0.5:
+        # Random flip on XY plane (RV에서는 비물리적 occlusion 패턴 생성하므로 기본 OFF)
+        if self.flip_x and random.random() < 0.5:
             points[:, 0] *= -1
-        if random.random() < 0.5:
+        if self.flip_y and random.random() < 0.5:
             points[:, 1] *= -1
 
         # Random rotation on XY plane
@@ -448,7 +487,18 @@ def build_tensors(all_points, augmentor=None):
     sph_coord = torch.FloatTensor(spherical_coords.astype(np.float32))
     sph_coord = sph_coord.view(NUM_TEMPORAL_FRAMES, MAX_POINTS, 3, 1)
 
-    return xyzi, des_coord, sph_coord, spherical_coords
+    # RV features: t0 프레임의 nearest-point range image [5, 64, 2048]
+    points_xyzi_t0 = points_xyzi[-MAX_POINTS:]
+    spherical_coords_t0 = spherical_coords[-MAX_POINTS:]
+    rv_input = generate_rv_features(
+        points_xyzi_t0,
+        spherical_coords_t0,
+        rv_height=RV_GRID_SIZE[0],
+        rv_width=RV_GRID_SIZE[1],
+    )
+    rv_input = torch.FloatTensor(rv_input)
+
+    return xyzi, des_coord, sph_coord, spherical_coords, rv_input
 
 
 def build_label_tensors(label_list, spherical_coords, movable_label_list):
@@ -552,7 +602,9 @@ class DataloadTrain(Dataset):
         point_clouds, label_list, movable_label_list, _ = filter_and_pad(point_clouds, label_list, movable_label_list)
 
         # 3. 양자화 + 7채널 피쳐 (augmentation 적용)
-        xyzi, des_coord, sph_coord, spherical_coords_raw = build_tensors(point_clouds, augmentor=self.augmentor)
+        xyzi, des_coord, sph_coord, spherical_coords_raw, rv_input = build_tensors(
+            point_clouds, augmentor=self.augmentor
+        )
 
         # 4. 레이블 텐서
         label_3d, label_2d = build_label_tensors(label_list, spherical_coords_raw, movable_label_list)
@@ -561,6 +613,7 @@ class DataloadTrain(Dataset):
             xyzi,  # [T, 7, N, 1]
             des_coord,  # [T, N, 3, 1]
             sph_coord,  # [T, N, 3, 1]
+            rv_input,  # [5, 64, 2048]
             label_3d,  # [N]
             label_2d,  # [64, 2048]
         )
@@ -604,7 +657,7 @@ class DataloadVal(Dataset):
         )
 
         # Val은 augmentation 없음
-        xyzi, des_coord, sph_coord, spherical_coords_raw = build_tensors(point_clouds)
+        xyzi, des_coord, sph_coord, spherical_coords_raw, rv_input = build_tensors(point_clouds)
         moving_label_3d, movable_label_2d = build_label_tensors(label_list, spherical_coords_raw, movable_label_list)
 
         # 평가용 메타 정보: 현재 프레임의 유효 포인트 수, 시퀀스 ID, 프레임 ID
@@ -616,6 +669,7 @@ class DataloadVal(Dataset):
             xyzi,  # [T, 7, N, 1]
             des_coord,  # [T, N, 3, 1]
             sph_coord,  # [T, N, 3, 1]
+            rv_input,  # [5, 64, 2048]
             moving_label_3d,  # [N]
             movable_label_2d,  # [64, 2048]
             num_valid_t0,  # int
@@ -656,7 +710,7 @@ class DataloadTest(Dataset):
         point_clouds = load_sequence_without_labels(meta_list)
         point_clouds, valid_point_counts = filter_and_pad(point_clouds)
 
-        xyzi, des_coord, sph_coord, _ = build_tensors(point_clouds)
+        xyzi, des_coord, sph_coord, _, rv_input = build_tensors(point_clouds)
 
         num_valid_t0 = valid_point_counts[-1]
         current_seq_id = meta_list[-1][2]
@@ -666,6 +720,7 @@ class DataloadTest(Dataset):
             xyzi,  # [T, 7, N, 1]
             des_coord,  # [T, N, 3, 1]
             sph_coord,  # [T, N, 3, 1]
+            rv_input,  # [5, 64, 2048]
             num_valid_t0,  # int
             current_seq_id,  # str
             current_file_id,  # str

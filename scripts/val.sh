@@ -4,6 +4,8 @@
 # FarMOS Validation / Test
 # ============================================================
 
+EXP_ID="Exp01"
+
 # Mode: "val" = seq 08 (predict + evaluate)
 #        "test" = seq 11-21 (predict only)
 MODE="val"
@@ -16,11 +18,12 @@ CONFIG="config/semantic-kitti-mos.yaml"
 BATCH_SIZE=1
 NUM_WORKERS=4
 
-# Checkpoint & Output
-CHECKPOINT="logs/Exp01/checkpoints/best_68.pth"
-PRED_DIR="logs/Exp01/predictions/"
-
 # ============================================================
+CODE_DIR="logs/${EXP_ID}/code"
+CHECKPOINT=$(ls logs/${EXP_ID}/checkpoints/best_*.pth)
+
+cd "${CODE_DIR}"
+echo "Checkpoint: ${CHECKPOINT}"
 
 python FarMOS_valid.py \
     --mode ${MODE} \
@@ -28,5 +31,5 @@ python FarMOS_valid.py \
     --config ${CONFIG} \
     --batch_size ${BATCH_SIZE} \
     --num_workers ${NUM_WORKERS} \
-    --checkpoint ${CHECKPOINT} \
-    --pred_dir ${PRED_DIR}
+    --checkpoint "../checkpoints/$(basename ${CHECKPOINT})" \
+    --pred_dir "../predictions/"

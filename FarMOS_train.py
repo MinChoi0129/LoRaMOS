@@ -17,7 +17,6 @@ from utils.builder import (
     build_scheduler,
     build_train_loader,
     build_val_loader,
-    predict,
     snapshot_code,
 )
 
@@ -34,33 +33,45 @@ def get_args():
 def validate(model, val_loader):
     model.eval()
     total_loss, total_mov, total_mbl, n = 0.0, 0.0, 0.0, 0
-    evaluator = iouEval(n_classes=3, ignore=[0])
+    moving_evaluator = iouEval(n_classes=3, ignore=[0])
+    movable_evaluator = iouEval(n_classes=3, ignore=[0])
 
     with torch.no_grad():
         for batch in tqdm(val_loader, desc="  Val", dynamic_ncols=True):
-            xyzi, des_coord, sph_coord, label_3d, label_2d, num_valid, _, _ = batch
+            xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid, _, _ = batch
             xyzi, des_coord, sph_coord = xyzi.cuda(), des_coord.cuda(), sph_coord.cuda()
+            rv_input = rv_input.cuda()
             label_3d, label_2d = label_3d.cuda(), label_2d.cuda()
 
-            out = model(xyzi, des_coord, sph_coord, label_3d, label_2d)
+            out = model(xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d)
             total_loss += out["loss"].item()
             total_mov += out["loss_moving"].item()
             total_mbl += out["loss_movable"].item()
             n += 1
 
-            pred_cls = predict(model, xyzi, des_coord, sph_coord)
-            gt_cls = label_3d.cpu().numpy()
-            for b in range(pred_cls.shape[0]):
+            # Moving evaluation (3D point-wise)
+            moving_pred = out["moving_logit_3d"].squeeze(-1).argmax(dim=1).cpu().numpy()
+            moving_gt = label_3d.cpu().numpy()
+            for b in range(moving_pred.shape[0]):
                 nv = num_valid[b].item()
-                evaluator.addBatch(pred_cls[b][:nv], gt_cls[b][:nv].astype(np.int32))
+                moving_evaluator.addBatch(moving_pred[b][:nv], moving_gt[b][:nv].astype(np.int32))
 
-    iou = evaluator.getIoU()
+            # Movable evaluation (2D RV pixel-wise)
+            movable_pred = out["movable_logit_2d"].argmax(dim=1).cpu().numpy()
+            movable_gt = label_2d.cpu().numpy()
+            for b in range(movable_pred.shape[0]):
+                movable_evaluator.addBatch(movable_pred[b].flatten(), movable_gt[b].flatten().astype(np.int32))
+
+    moving_iou = moving_evaluator.getIoU()
+    movable_iou = movable_evaluator.getIoU()
     return {
         "loss": total_loss / n,
         "loss_moving": total_mov / n,
         "loss_movable": total_mbl / n,
-        "iou_static": iou[1],
-        "iou_moving": iou[2],
+        "iou_static": moving_iou[1],
+        "iou_moving": moving_iou[2],
+        "iou_immovable": movable_iou[1],
+        "iou_movable": movable_iou[2],
     }
 
 
@@ -79,12 +90,14 @@ if __name__ == "__main__":
     logger.log(f"Train config: {cfg}")
 
     wandb_name = args.wandb_name or os.path.basename(args.log_dir.rstrip("/"))
-    init_wandb(argparse.Namespace(**cfg, wandb_name=wandb_name), log_dir=args.log_dir)
+    init_wandb(argparse.Namespace(**cfg, wandb_name=wandb_name), log_dir=args.log_dir, resume=args.resume)
 
     train_loader = build_train_loader(cfg)
     val_loader = build_val_loader(cfg["sequence_dir"], cfg["num_workers"])
 
     model = torch.compile(FarMOS().cuda())
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.log(f"Total Trainable parameters: {num_params:,}")
     optimizer = build_optimizer(cfg, model)
     scheduler = build_scheduler(cfg, optimizer)
 
@@ -95,21 +108,21 @@ if __name__ == "__main__":
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         start_epoch = ckpt["epoch"] + 1
         best_moving_iou = ckpt.get("best_moving_iou", 0.0)
-        logger.log(f"Resumed from epoch {ckpt['epoch']}, best_iou_moving: {best_moving_iou:.4f}")
+        logger.log(f"Resumed from epoch {ckpt['epoch']}, best_iou_moving: {best_moving_iou:.6f}")
 
     for epoch in range(start_epoch, cfg["epochs"] + 1):
         model.train()
         ep_loss, ep_mov, ep_mbl, n = 0.0, 0.0, 0.0, 0
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg['epochs']}", dynamic_ncols=True)
-        for xyzi, des_coord, sph_coord, label_3d, label_2d in pbar:
+        for xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d in pbar:
             xyzi, des_coord, sph_coord = xyzi.cuda(), des_coord.cuda(), sph_coord.cuda()
+            rv_input = rv_input.cuda()
             label_3d, label_2d = label_3d.cuda(), label_2d.cuda()
 
             optimizer.zero_grad()
-            out = model(xyzi, des_coord, sph_coord, label_3d, label_2d)
+            out = model(xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d)
             out["loss"].backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
             optimizer.step()
 
             ep_loss += out["loss"].item()
@@ -125,7 +138,8 @@ if __name__ == "__main__":
         logger.log(
             f"[Epoch {epoch:03d}] Train: {ep_loss/n:.4f} | "
             f"Val: {val['loss']:.4f} (mov: {val['loss_moving']:.4f}, mbl: {val['loss_movable']:.4f}) | "
-            f"IoU static: {val['iou_static']:.4f}, moving: {val['iou_moving']:.4f} | LR: {lr_now:.6f}"
+            f"Moving IoU static: {val['iou_static']:.6f}, moving: {val['iou_moving']:.6f} | "
+            f"Movable IoU immovable: {val['iou_immovable']:.6f}, movable: {val['iou_movable']:.6f} | LR: {lr_now:.6f}"
         )
 
         log_wandb(
@@ -138,6 +152,8 @@ if __name__ == "__main__":
                 "val/loss_movable": val["loss_movable"],
                 "val/iou_static": val["iou_static"],
                 "val/iou_moving": val["iou_moving"],
+                "val/iou_immovable": val["iou_immovable"],
+                "val/iou_movable": val["iou_movable"],
                 "lr": lr_now,
             },
             step=epoch,
