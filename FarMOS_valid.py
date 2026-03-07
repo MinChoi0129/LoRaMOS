@@ -72,10 +72,9 @@ def run_val(args, model, task_cfg):
                 moving_evaluator.addBatch(pred_v, gt_v)
                 movable_evaluator.addBatch(movable_pred[b].flatten(), movable_gt[b].flatten())
 
-                # Range-wise evaluation
-                pc_xyz = np.fromfile(
-                    os.path.join(args.sequence_dir, sid, "velodyne", f"{fid}.bin"), dtype=np.float32
-                ).reshape(-1, 4)[:nv, :3]
+                # Range-wise evaluation: xyzi의 t0 프레임에서 xyz 추출 (이미 BEV 필터 후)
+                # xyzi shape: [B, T, 7, N, 1], channels 0,1,2 = x,y,z
+                pc_xyz = xyzi[b, -1, :3, :nv, 0].cpu().numpy().T  # [nv, 3]
                 depth = np.linalg.norm(pc_xyz, axis=1)
 
                 for (rmin, rmax), reval in range_evaluators.items():

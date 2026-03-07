@@ -35,6 +35,8 @@ def validate(model, val_loader):
     total_loss, total_mov, total_mbl, n = 0.0, 0.0, 0.0, 0
     moving_evaluator = iouEval(n_classes=3, ignore=[0])
     movable_evaluator = iouEval(n_classes=3, ignore=[0])
+    range_bins = [(0, 10), (10, 20), (20, 30), (30, 40), (40, 50)]
+    range_evaluators = {r: iouEval(n_classes=3, ignore=[0]) for r in range_bins}
 
     with torch.no_grad():
         for batch in tqdm(val_loader, desc="  Val", dynamic_ncols=True):
@@ -57,9 +59,21 @@ def validate(model, val_loader):
             # Moving evaluation (3D point-wise)
             moving_pred = out["moving_logit_3d"].squeeze(-1).argmax(dim=1).cpu().numpy()
             moving_gt = label_3d.cpu().numpy()
+            # xyzi channel 4 = distance, 현재 프레임(t=-1)
+            depth = xyzi[:, -1, 4, :, 0].cpu().numpy()  # [B, N]
+
             for b in range(moving_pred.shape[0]):
                 nv = num_valid[b].item()
-                moving_evaluator.addBatch(moving_pred[b][:nv], moving_gt[b][:nv].astype(np.int32))
+                pred_v = moving_pred[b][:nv]
+                gt_v = moving_gt[b][:nv].astype(np.int32)
+                moving_evaluator.addBatch(pred_v, gt_v)
+
+                # Range-wise moving evaluation
+                depth_v = depth[b][:nv]
+                for (rmin, rmax), reval in range_evaluators.items():
+                    rmask = (depth_v >= rmin) & (depth_v < rmax)
+                    if rmask.any():
+                        reval.addBatch(pred_v[rmask], gt_v[rmask])
 
             # Movable evaluation (2D RV pixel-wise)
             movable_pred = out["movable_logit_2d"].argmax(dim=1).cpu().numpy()
@@ -69,7 +83,7 @@ def validate(model, val_loader):
 
     _, moving_iou = moving_evaluator.getIoU()
     _, movable_iou = movable_evaluator.getIoU()
-    return {
+    result = {
         "loss": total_loss / n,
         "loss_moving": total_mov / n,
         "loss_movable": total_mbl / n,
@@ -78,6 +92,10 @@ def validate(model, val_loader):
         "iou_immovable": movable_iou[1].item(),
         "iou_movable": movable_iou[2].item(),
     }
+    for (rmin, rmax), reval in range_evaluators.items():
+        _, r_iou = reval.getIoU()
+        result[f"iou_moving_{rmin}_{rmax}m"] = r_iou[2].item()
+    return result
 
 
 if __name__ == "__main__":
@@ -140,29 +158,32 @@ if __name__ == "__main__":
         lr_now = optimizer.param_groups[0]["lr"]
         val = validate(model, val_loader)
 
+        range_str = " | ".join(f"{k}: {val[k]:.4f}" for k in val if k.startswith("iou_moving_"))
         logger.log(
             f"[Epoch {epoch:03d}] Train: {ep_loss/n:.4f} | "
             f"Val: {val['loss']:.4f} (mov: {val['loss_moving']:.4f}, mbl: {val['loss_movable']:.4f}) | "
             f"Moving IoU static: {val['iou_static']:.6f}, moving: {val['iou_moving']:.6f} | "
-            f"Movable IoU immovable: {val['iou_immovable']:.6f}, movable: {val['iou_movable']:.6f} | LR: {lr_now:.6f}"
+            f"Movable IoU immovable: {val['iou_immovable']:.6f}, movable: {val['iou_movable']:.6f} | LR: {lr_now:.6f}\n"
+            f"  Range-wise Moving IoU: {range_str}"
         )
 
-        log_wandb(
-            {
-                "train/loss": ep_loss / n,
-                "train/loss_moving": ep_mov / n,
-                "train/loss_movable": ep_mbl / n,
-                "val/loss": val["loss"],
-                "val/loss_moving": val["loss_moving"],
-                "val/loss_movable": val["loss_movable"],
-                "val/iou_static": val["iou_static"],
-                "val/iou_moving": val["iou_moving"],
-                "val/iou_immovable": val["iou_immovable"],
-                "val/iou_movable": val["iou_movable"],
-                "lr": lr_now,
-            },
-            step=epoch,
-        )
+        wandb_dict = {
+            "train/loss": ep_loss / n,
+            "train/loss_moving": ep_mov / n,
+            "train/loss_movable": ep_mbl / n,
+            "val/loss": val["loss"],
+            "val/loss_moving": val["loss_moving"],
+            "val/loss_movable": val["loss_movable"],
+            "val/iou_static": val["iou_static"],
+            "val/iou_moving": val["iou_moving"],
+            "val/iou_immovable": val["iou_immovable"],
+            "val/iou_movable": val["iou_movable"],
+            "lr": lr_now,
+        }
+        for k in val:
+            if k.startswith("iou_moving_"):
+                wandb_dict[f"val/{k}"] = val[k]
+        log_wandb(wandb_dict, step=epoch)
 
         save_checkpoint(model, optimizer, scheduler, epoch, os.path.join(ckpt_dir, "latest.pth"), best_moving_iou)
         best_moving_iou = save_best_checkpoint(

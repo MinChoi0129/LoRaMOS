@@ -59,42 +59,6 @@ def get_module(param_dic, **kwargs):
     return result_module
 
 
-class MetaKernel(nn.Module):
-    def __init__(self, in_ch, out_ch, coord_ch=5, kernel_size=3):
-        super(MetaKernel, self).__init__()
-        self.k2 = kernel_size * kernel_size
-
-        # 기하학적 특징(상대적 거리)을 가중치로 변환하는 MLP
-        self.mlp = nn.Sequential(
-            nn.Conv2d(coord_ch, 16, kernel_size=1),
-            nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(16, in_ch, kernel_size=1),
-        )
-        # 가중치가 적용된 주변 9개 영역을 하나로 병합
-        self.reduction = nn.Conv2d(in_ch * self.k2, out_ch, kernel_size=1)
-
-    def forward(self, x, coord):
-        B, C, H, W = x.shape
-
-        # 1. 주변 좌표 및 피처 샘플링 (Unfold)
-        # coord_unfold: [B, coord_ch, 9, H, W], x_unfold: [B, C, 9, H, W]
-        coord_unfold = F.unfold(coord, 3, padding=1).view(B, -1, self.k2, H, W)
-        x_unfold = F.unfold(x, 3, padding=1).view(B, C, self.k2, H, W)
-
-        # 2. Relative Coordinates (MF-MOS 핵심: 주변 - 중심)
-        # coord[:, :, None, :, :]는 중심점의 좌표를 9개 영역에 맞춰 확장한 것
-        rel_coord = coord_unfold - coord[:, :, None, :, :]
-
-        # 3. 가중치 생성 (MLP는 픽셀 단위로 작동해야 하므로 4D로 잠시 변환)
-        # [B, coord_ch, 9, H, W] -> [B, coord_ch, 9*H*W, 1]
-        weights = self.mlp(rel_coord.view(B, -1, self.k2 * H * W, 1))
-        weights = torch.sigmoid(weights).view(B, C, self.k2, H, W)
-
-        # 4. 가중치 적용 및 병합
-        out = (x_unfold * weights).view(B, C * self.k2, H, W)
-        return self.reduction(out)
-
-
 class TConv(nn.Module):
     def __init__(self, T, cin, cout):
         super(TConv, self).__init__()

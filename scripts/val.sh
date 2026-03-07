@@ -4,7 +4,7 @@
 # FarMOS Validation / Test
 # ============================================================
 
-EXP_ID="Exp01"
+EXP_ID="Exp11"
 
 # Mode: "val" = seq 08 (predict + evaluate)
 #        "test" = seq 11-21 (predict only)

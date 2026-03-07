@@ -1,5 +1,5 @@
 import torch
-from networks import backbone
+from networks import backbone_BEV
 
 
 def project_to_bev(pcd_feat, des_coord_stacked, proj_H=512, proj_W=512, mode="max"):
@@ -81,8 +81,8 @@ def project_to_rv(pcd_feat, sph_coord_t0, proj_H=64, proj_W=2048, mode="max"):
 
 
 unprojectors = {
-    "full": backbone.BilinearSample(scale_rate=(1.0, 1.0)),
-    "half": backbone.BilinearSample(scale_rate=(0.5, 0.5)),
-    "quarter": backbone.BilinearSample(scale_rate=(0.25, 0.25)),
-    "eighth": backbone.BilinearSample(scale_rate=(0.125, 0.125)),
+    "full": backbone_BEV.BilinearSample(scale_rate=(1.0, 1.0)),
+    "half": backbone_BEV.BilinearSample(scale_rate=(0.5, 0.5)),
+    "quarter": backbone_BEV.BilinearSample(scale_rate=(0.25, 0.25)),
+    "eighth": backbone_BEV.BilinearSample(scale_rate=(0.125, 0.125)),
 }

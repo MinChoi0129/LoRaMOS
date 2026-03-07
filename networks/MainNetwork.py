@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import yaml
-from networks import backbone, loss, SubNetworks
+from networks import backbone_BEV, loss, SubNetworks
 from utils.pretty_printer_and_saver import save_feature_as_img, shprint
 from utils import projector_unprojector
 
@@ -22,10 +22,10 @@ class FarMOS(nn.Module):
             print(f"Trainable parameters: [{model_name}] > {num_params:,}")
 
         self.pointnet_ch = 64
-        self.pointnet = backbone.PointNetStacker(7, self.pointnet_ch, pre_bn=True, stack_num=2)
+        self.pointnet = backbone_BEV.PointNetStacker(7, self.pointnet_ch, pre_bn=True, stack_num=2)
         self.moving_bev_net = SubNetworks.BEVNet()
         self.movable_rv_net = SubNetworks.RVNet()
-        self.point_fuse = backbone.CatFusion([self.pointnet_ch, 32, 3], 3)
+        self.point_fuse = backbone_BEV.CatFusion([self.pointnet_ch, 32, 3], 3)
 
         __print_num_params(self.pointnet, "pointnet")
         __print_num_params(self.moving_bev_net, "moving_bev_net")
@@ -49,24 +49,40 @@ class FarMOS(nn.Module):
 
         moving_loss_w = get_weights("learning_map")
         movable_loss_w = get_weights("movable_learning_map")
-        self.moving_nll_loss = nn.NLLLoss(weight=moving_loss_w.double(), ignore_index=0)
+
+        self.moving_nll_loss = nn.NLLLoss(weight=moving_loss_w.double(), ignore_index=0, reduction="none")
         self.movable_nll_loss = nn.NLLLoss(weight=movable_loss_w.double(), ignore_index=0)
         self.lovasz_loss = loss.lovasz_softmax
 
     def _build_utils(self):
+        # Projectors (좌표 flip 걱정 없이)
         self.project_to_bev = projector_unprojector.project_to_bev  # T축 필요 (단일 시간이면 T축에 1이라도 있어야함)
         self.project_to_rv = projector_unprojector.project_to_rv  # T축 없어야함
+
+        # Unprojectos by resolution. (Note. BEV는 그냥 좌표 받아도 되는데 RV unproject시에는 flip된 좌표 받아야함)
         self.unproject_from_full = projector_unprojector.unprojectors["full"]  # T축 없어야함
         self.unproject_from_half = projector_unprojector.unprojectors["half"]  # T축 없어야함
 
-    def get_loss(self, pred, label, mode):
+    def get_loss(self, pred, label, mode, dist=None):
         if mode == "moving":
             B, C = pred.shape[0], pred.shape[1]
 
             pred = pred.view(B, C, -1).unsqueeze(-1)
             label = label.view(B, -1).unsqueeze(-1)
 
-            l_nll = self.moving_nll_loss(F.log_softmax(pred, dim=1).double(), label).float()
+            # Per-point NLL (reduction='none') → [B, N, 1]
+            per_point_nll = self.moving_nll_loss(F.log_softmax(pred, dim=1).double(), label)
+
+            # 거리 제곱 가중치: 멀리 있는 점일수록 더 큰 페널티
+            dist_w = dist.view(B, -1, 1) ** 2  # [B, N, 1]
+            dist_w = dist_w / (dist_w.mean() + 1e-6)  # 정규화
+            per_point_nll = per_point_nll * dist_w.double()
+
+            # ignore_index=0인 점 제외하고 평균
+            valid = (label != 0).float()
+            l_nll = (per_point_nll * valid.double()).sum() / (valid.sum() + 1e-6)
+            l_nll = l_nll.float()
+
             l_lovasz = self.lovasz_loss(pred, label.long(), ignore=0)
 
             return l_nll + l_lovasz
@@ -118,37 +134,53 @@ class FarMOS(nn.Module):
         # **************** [ Step 5: BEV Semantic Supervision 생성 및 BEV 피쳐 생성 ] ****************
         movable_logit_as_bev = self.project_to_bev(movable_logit_as_3d, des_coord_t0)  # [B, K=3, 512, 512]
         movable_probability_as_bev = torch.softmax(movable_logit_as_bev, dim=1)  # [B, K=3, 512, 512]
-        movable_probability_mask_bev = movable_probability_as_bev[
-            :, 2:3, :, :
-        ].detach()  # [B, p=1, 512, 512] => 객체 존재 확률
-        moving_feat_2d = self.moving_bev_net(bev_input, movable_probability_mask_bev)  # [B, C=32, H=256, W=256]
+        movable_probability_mask_bev = movable_probability_as_bev[:, 2:3, :, :].detach()  # [B, p=1, 512, 512] => 객체 존재 확률
+        moving_feat_2d = self.moving_bev_net(
+            bev_input,
+            movable_probability_mask_bev,
+        )  # [B, C=32, H=512, W=512]
 
         # **************** [ Step 6: 3차원 피처 모두 융합 ] ****************
-        moving_feat_3d = self.unproject_from_half(moving_feat_2d, bev_coord_t0)  # [B, C=32, N, 1]
-        moving_logit_3d = self.point_fuse(pcd_feat_t0, moving_feat_3d, movable_logit_as_3d.detach())  # [B, K=3, N, 1]
+        moving_feat_3d = self.unproject_from_full(moving_feat_2d, bev_coord_t0)  # [B, C=32, N, 1]
+        moving_logit_3d = self.point_fuse(
+            pcd_feat_t0,
+            moving_feat_3d,
+            movable_logit_as_3d.detach(),
+        )  # [B, K=3, N, 1]
 
         RUN_SAVE_FEATURE = False
         if RUN_SAVE_FEATURE:
-            save_feature_as_img([], [""], "max")
+            save_feature_as_img(
+                [
+                    bev_input,
+                    movable_logit_2d,
+                    movable_logit_2d.argmax(dim=1),
+                    self.project_to_bev(moving_feat_3d, des_coord_t0),
+                    self.project_to_bev(moving_logit_3d, des_coord_t0).argmax(dim=1),
+                    movable_probability_mask_bev,
+                    moving_feat_2d,
+                ],
+                [
+                    "bev_input",
+                    "movable_logit_2d",
+                    "movable_logit_2d_argmax",
+                    "moving_feat_3d_into_bev",
+                    "moving_logit_3d_argmax_into_bev",
+                    "movable_probability_mask_bev",
+                    "moving_feat_2d",
+                ],
+                "max",
+            )
 
         return moving_logit_3d, movable_logit_2d
-        # return torch.rand(B, 3, N, 1).cuda(), movable_logit_2d
 
-    def forward(
-        self,
-        xyzi,
-        des_coord,
-        sph_coord,
-        rv_input,
-        current_moving_label_3d,
-        current_movable_label_2d,
-    ):
+    def forward(self, xyzi, des_coord, sph_coord, rv_input, current_moving_label_3d, current_movable_label_2d):
         moving_logit_3d, movable_logit_2d = self.infer(xyzi, des_coord, sph_coord, rv_input)
 
-        loss_moving = self.get_loss(moving_logit_3d, current_moving_label_3d, mode="moving")
+        dist_t0 = xyzi[:, -1, 4, :, 0]  # [B, N] — channel 4 = distance
+        loss_moving = self.get_loss(moving_logit_3d, current_moving_label_3d, mode="moving", dist=dist_t0)
         loss_movable = self.get_loss(movable_logit_2d, current_movable_label_2d, mode="movable")
         loss = loss_moving + loss_movable
-        # loss = loss_movable
 
         return {
             "loss": loss,

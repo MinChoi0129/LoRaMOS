@@ -1,12 +1,6 @@
-#!/usr/bin/env python3
-# This file is covered by the LICENSE file in the root of this project.
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-# import softpool_cuda
-# from SoftPool import soft_pool2d, SoftPool2d
 from typing import Tuple
 
 
@@ -161,7 +155,6 @@ class UpBlock(nn.Module):
         self.bn4 = nn.BatchNorm2d(out_filters)
 
     def forward(self, x, skip):
-        # upA = nn.PixelShuffle(2)(x)
         upA = pixelshuffle(x, (2, 4))
         if self.drop_out:
             upA = self.dropout1(upA)
@@ -353,14 +346,10 @@ class MetaKernel(nn.Module):
         # ic(coord_sample_data.size())
         # ic(coord_data.size())
 
-        rel_coord = self.relative_coord(  # (1, 5, 9, 64, 2048)
-            coord_sample_data, coord_data, coord_channels, kernel_size
-        )
+        rel_coord = self.relative_coord(coord_sample_data, coord_data, coord_channels, kernel_size)  # (1, 5, 9, 64, 2048)
         # ic(rel_coord.size())
 
-        weights = self.mlp(  # (1, 32, 9, 64, 2048)
-            rel_coord, in_channels=coord_channels, channel_list=self.channel_list
-        )
+        weights = self.mlp(rel_coord, in_channels=coord_channels, channel_list=self.channel_list)  # (1, 32, 9, 64, 2048)
         # ic(weights.size())
 
         data_sample = self.sample_data(data, kernel_size)  # (1, 288, 131072)
@@ -379,30 +368,3 @@ class MetaKernel(nn.Module):
 
         output = self.conv1x1(output_reshape)  # (1, 32, 64, 2048)
         return output
-
-
-if __name__ == "__main__":
-    # from icecream import ic
-    #
-    # input = torch.randn(1, 8, 64, 2048)
-    # METAConv = MetaKernel(
-    #     num_batch=1,
-    #     feat_height=64,
-    #     feat_width=2048,
-    #     coord_channels=8)
-    #
-    # downCntx = torch.randn(1, 32, 64, 2048)
-    # output = METAConv(data=downCntx,
-    #                   coord_data=input,
-    #                   data_channels=downCntx.size()[1],
-    #                   coord_channels=input.size()[1],
-    #                   kernel_size=3)
-    #
-    # ic(output.size())
-
-    input = torch.randn(1, 32, 64, 2048)
-    block = ResBlock(32, 2 * 32, 0.2, pooling=True, drop_out=False, kernel_size=(2, 4))
-    output1, output2 = block(input)
-
-    print(output1.shape)
-    print(output2.shape)

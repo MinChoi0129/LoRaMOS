@@ -21,6 +21,7 @@ class Logger:
 
 def init_wandb(args, log_dir="logs/", resume=False):
     import wandb
+
     os.makedirs(log_dir, exist_ok=True)
 
     resume_id = None
@@ -43,5 +44,6 @@ def init_wandb(args, log_dir="logs/", resume=False):
 
 def log_wandb(metrics, step):
     import wandb
+
     metrics["epoch"] = step
     wandb.log(metrics)
