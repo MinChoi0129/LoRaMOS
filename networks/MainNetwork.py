@@ -6,6 +6,7 @@ import yaml
 from networks import backbone_BEV, loss, SubNetworks
 from utils.pretty_printer_and_saver import save_feature_as_img, shprint
 from utils import projector_unprojector
+from datasets.config import NUM_TEMPORAL_FRAMES
 
 
 class FarMOS(nn.Module):
@@ -23,7 +24,7 @@ class FarMOS(nn.Module):
 
         self.pointnet_ch = 64
         self.pointnet = backbone_BEV.PointNetStacker(7, self.pointnet_ch, pre_bn=True, stack_num=2)
-        self.moving_bev_net = SubNetworks.BEVNet()
+        self.moving_bev_net = SubNetworks.BEVNet(in_channels=NUM_TEMPORAL_FRAMES * self.pointnet_ch)
         self.movable_rv_net = SubNetworks.RVNet()
         self.point_fuse = backbone_BEV.CatFusion([self.pointnet_ch, 32, 3], 3)
 

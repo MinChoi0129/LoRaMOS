@@ -1,5 +1,6 @@
 __pycache__
 logs
+logs(deprecated)
 wandb
 images
 .vscode

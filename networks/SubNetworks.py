@@ -6,12 +6,12 @@ from networks.backbone_RV import MetaKernel, ResContextBlock, ResBlock, UpBlock
 
 
 class BEVNet(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels):
         super(BEVNet, self).__init__()
         block = backbone_BEV.BasicBlockv2  # CSAtt (Channel + Spatial)
 
         # ---- Encoder ----
-        self.enc1 = self._make_layer(block, 192, 64, num_blocks=3, stride=2)  # → [B, 64, 256, 256]
+        self.enc1 = self._make_layer(block, in_channels, 64, num_blocks=3, stride=2)  # → [B, 64, 256, 256]
         self.enc2 = self._make_layer(block, 64, 128, num_blocks=3, stride=2)  # → [B, 128, 128, 128]
         self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2, dilation=2)  # → [B, 256, 64, 64]
 

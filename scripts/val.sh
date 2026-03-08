@@ -1,13 +1,12 @@
 #!/bin/bash
 
 # ============================================================
-# FarMOS Validation / Test
+# FarMOS Prediction (save .label files)
 # ============================================================
 
-EXP_ID="Exp11"
+EXP_ID="Exp16"
 
-# Mode: "val" = seq 08 (predict + evaluate)
-#        "test" = seq 11-21 (predict only)
+# Mode: "val" = seq 08, "test" = seq 11-21
 MODE="val"
 
 # Dataset
