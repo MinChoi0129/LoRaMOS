@@ -1,0 +1,39 @@
+ninja_required_version = 1.3
+cxx = /opt/conda/bin/x86_64-conda-linux-gnu-c++
+nvcc = /opt/conda/bin/nvcc
+
+cflags = -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem /opt/conda/include -I/opt/conda/targets/x86_64-linux/include -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -isystem /opt/conda/include -I/opt/conda/targets/x86_64-linux/include -fPIC -DWITH_CUDA -I/home/work/FarMOS/deformattn/src -I/opt/conda/envs/farmos/lib/python3.9/site-packages/torch/include -I/opt/conda/envs/farmos/lib/python3.9/site-packages/torch/include/torch/csrc/api/include -I/opt/conda/include -I/opt/conda/envs/farmos/include/python3.9 -c
+post_cflags = -DTORCH_API_INCLUDE_EXTENSION_H '-DPYBIND11_COMPILER_TYPE="_gcc"' '-DPYBIND11_STDLIB="_libstdcpp"' '-DPYBIND11_BUILD_ABI="_cxxabi1018"' -DTORCH_EXTENSION_NAME=MultiScaleDeformableAttention -std=c++17
+cuda_cflags = -DWITH_CUDA -I/home/work/FarMOS/deformattn/src -I/opt/conda/envs/farmos/lib/python3.9/site-packages/torch/include -I/opt/conda/envs/farmos/lib/python3.9/site-packages/torch/include/torch/csrc/api/include -I/opt/conda/include -I/opt/conda/envs/farmos/include/python3.9 -c
+cuda_post_cflags = -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr --compiler-options ''"'"'-fPIC'"'"'' -DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ -DTORCH_API_INCLUDE_EXTENSION_H '-DPYBIND11_COMPILER_TYPE="_gcc"' '-DPYBIND11_STDLIB="_libstdcpp"' '-DPYBIND11_BUILD_ABI="_cxxabi1018"' -DTORCH_EXTENSION_NAME=MultiScaleDeformableAttention -gencode=arch=compute_100,code=sm_100 -gencode=arch=compute_101,code=sm_101 -gencode=arch=compute_120,code=compute_120 -gencode=arch=compute_120,code=sm_120 -gencode=arch=compute_50,code=sm_50 -gencode=arch=compute_52,code=sm_52 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_89,code=sm_89 -gencode=arch=compute_90,code=sm_90 -ccbin /opt/conda/bin/x86_64-conda-linux-gnu-cc -std=c++17
+cuda_dlink_post_cflags = 
+sycl_dlink_post_cflags = 
+ldflags = 
+
+rule compile
+  command = $cxx -MMD -MF $out.d $cflags -c $in -o $out $post_cflags
+  depfile = $out.d
+  deps = gcc
+
+rule cuda_compile
+  depfile = $out.d
+  deps = gcc
+  command = $nvcc --generate-dependencies-with-compile --dependency-output $out.d $cuda_cflags -c $in -o $out $cuda_post_cflags
+
+
+
+
+
+
+
+build /home/work/FarMOS/deformattn/build/temp.linux-x86_64-cpython-39/home/work/FarMOS/deformattn/src/cpu/ms_deform_attn_cpu.o: compile /home/work/FarMOS/deformattn/src/cpu/ms_deform_attn_cpu.cpp
+build /home/work/FarMOS/deformattn/build/temp.linux-x86_64-cpython-39/home/work/FarMOS/deformattn/src/cuda/ms_deform_attn_cuda.o: cuda_compile /home/work/FarMOS/deformattn/src/cuda/ms_deform_attn_cuda.cu
+build /home/work/FarMOS/deformattn/build/temp.linux-x86_64-cpython-39/home/work/FarMOS/deformattn/src/vision.o: compile /home/work/FarMOS/deformattn/src/vision.cpp
+
+
+
+
+
+
+
+

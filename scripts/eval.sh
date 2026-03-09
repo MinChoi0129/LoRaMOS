@@ -4,7 +4,7 @@
 # FarMOS Evaluation (pred vs GT, range-wise & overall)
 # ============================================================
 
-EXP_ID="Exp16"
+EXP_ID="Exp17"
 
 # Dataset
 SEQUENCE_DIR="/home/ssd_data/ROOT_KITTI/KITTI/dataset/sequences/"
@@ -19,6 +19,7 @@ RANGE_STEP=10
 
 # ============================================================
 PRED_DIR="logs/${EXP_ID}/predictions/"
+PRED_DIR="/home/work/LMNet/salsanext_residual_8_sem_allseqs"
 
 python FarMOS_eval.py \
     --sequence_dir ${SEQUENCE_DIR} \

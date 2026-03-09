@@ -8,12 +8,22 @@ from networks.backbone_RV import MetaKernel, ResContextBlock, ResBlock, UpBlock
 class BEVNet(nn.Module):
     def __init__(self, in_channels):
         super(BEVNet, self).__init__()
-        block = backbone_BEV.BasicBlockv2  # CSAtt (Channel + Spatial)
+        block = backbone_BEV.BasicBlock
 
         # ---- Encoder ----
         self.enc1 = self._make_layer(block, in_channels, 64, num_blocks=3, stride=2)  # → [B, 64, 256, 256]
         self.enc2 = self._make_layer(block, 64, 128, num_blocks=3, stride=2)  # → [B, 128, 128, 128]
-        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2, dilation=2)  # → [B, 256, 64, 64]
+        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2)  # → [B, 256, 64, 64]
+
+        # ---- Deformable Attention at bottleneck ----
+        self.bottleneck_attn = backbone_BEV.DeformAttnBottleneck(
+            in_channels=256,
+            d_model=128,
+            d_ffn=512,
+            n_heads=4,
+            n_points=4,
+            num_layers=2,
+        )
 
         # ---- Decoder (Feature Pyramid) ----
         self.dec1 = backbone_BEV.BasicConv2d(64 + 128 + 256, 128, kernel_size=3, padding=1)
@@ -22,8 +32,8 @@ class BEVNet(nn.Module):
         # ---- Upsample to 512 ----
         self.dec_up = nn.Sequential(
             nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1, groups=32, bias=False),  # depthwise
-            nn.Conv2d(32, 32, kernel_size=1, bias=False),  # pointwise
+            nn.Conv2d(32, 32, kernel_size=3, padding=1, groups=32, bias=False),
+            nn.Conv2d(32, 32, kernel_size=1, bias=False),
             nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
         )
@@ -38,33 +48,32 @@ class BEVNet(nn.Module):
 
     def forward(self, bev_feat, movable_probability_mask_bev):
         """
-        bev_feat:                       [B, 192, 512, 512]  누적 BEV feature (T*pointnet_ch)
-        movable_probability_mask_bev:   [B, 1, 512, 512] 객체 존재 확률
+        bev_feat:                       [B, T*64, 512, 512]  누적 BEV feature
+        movable_probability_mask_bev:   [B, 1, 512, 512]     객체 존재 확률
         """
 
-        # Encoder L1
+        # ---- Encoder ----
         e1 = self.enc1(bev_feat)  # [B, 64, 256, 256]
         m1 = F.max_pool2d(movable_probability_mask_bev, kernel_size=2, stride=2)
-        e1 = e1 * (1 + m1)  # 객체가 있는 곳의 모션 피처를 증폭 (Residual style)
+        e1 = e1 * (1 + m1)
 
-        # Encoder L2
         e2 = self.enc2(e1)  # [B, 128, 128, 128]
         m2 = F.max_pool2d(m1, kernel_size=2, stride=2)
         e2 = e2 * (1 + m2)
 
-        # Encoder L3 (dilation=2 for larger receptive field)
         e3 = self.enc3(e2)  # [B, 256, 64, 64]
 
+        # ---- Deformable Attention ----
+        e3 = self.bottleneck_attn(e3)  # [B, 256, 64, 64]
+
         # ---- Decoder: Feature Pyramid ----
-        target_size = e1.shape[2:]  # (256, 256)
+        target_size = e1.shape[2:]
         e2_up = F.interpolate(e2, size=target_size, mode="bilinear", align_corners=True)
         e3_up = F.interpolate(e3, size=target_size, mode="bilinear", align_corners=True)
 
         dec = torch.cat([e1, e2_up, e3_up], dim=1)  # [B, 448, 256, 256]
         dec = self.dec1(dec)  # [B, 128, 256, 256]
         dec = self.dec2(dec)  # [B, 32, 256, 256]
-
-        # Upsample to original resolution
         dec = self.dec_up(dec)  # [B, 32, 512, 512]
 
         return dec

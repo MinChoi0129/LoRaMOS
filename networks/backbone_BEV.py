@@ -452,6 +452,90 @@ class PointAttFusion(nn.Module):
         return x_out
 
 
+class DeformAttnBottleneck(nn.Module):
+    """Deformable Attention bottleneck for BEV feature refinement.
+    Projects input to d_model, applies multi-layer deformable attention, projects back."""
+
+    def __init__(self, in_channels, d_model=128, d_ffn=512, n_heads=4, n_points=4, num_layers=2):
+        super(DeformAttnBottleneck, self).__init__()
+        from deformattn.modules import MSDeformAttn
+        import copy
+
+        self.d_model = d_model
+        self.proj_in = nn.Sequential(
+            nn.Conv2d(in_channels, d_model, 1, bias=False),
+            nn.BatchNorm2d(d_model),
+            act_layer,
+        )
+        self.query_embed = nn.Embedding(64 * 64, d_model)
+
+        # Deformable attention layers
+        single_layer = self._build_layer(d_model, d_ffn, n_heads, n_points)
+        self.layers = nn.ModuleList([copy.deepcopy(single_layer) for _ in range(num_layers)])
+
+        self.proj_out = nn.Sequential(
+            nn.Conv2d(d_model, in_channels, 1, bias=False),
+            nn.BatchNorm2d(in_channels),
+            act_layer,
+        )
+
+    def _build_layer(self, d_model, d_ffn, n_heads, n_points):
+        from deformattn.modules import MSDeformAttn
+
+        return _DeformAttnLayer(d_model, d_ffn, n_heads, n_points)
+
+    def forward(self, x):
+        bs, _, h, w = x.shape
+        x_proj = self.proj_in(x)  # [B, d_model, H, W]
+
+        # Prepare deformable attention inputs
+        spatial_shapes = torch.tensor([[h, w]], dtype=torch.long, device=x.device)
+        level_start_index = torch.zeros(1, dtype=torch.long, device=x.device)
+        valid_ratios = torch.ones((bs, 1, 2), dtype=x.dtype, device=x.device)
+        reference_points = self._get_reference_points(h, w, bs, x.device, x.dtype)
+
+        src = x_proj.flatten(2).transpose(1, 2)  # [B, H*W, d_model]
+        query = self.query_embed.weight.unsqueeze(0).expand(bs, -1, -1)
+
+        for layer in self.layers:
+            query = layer(query, src, reference_points, spatial_shapes, level_start_index)
+
+        out = self.proj_out(query.transpose(1, 2).reshape(bs, -1, h, w))
+        return out
+
+    @staticmethod
+    def _get_reference_points(h, w, bs, device, dtype):
+        ref_y, ref_x = torch.meshgrid(
+            torch.linspace(0.5, h - 0.5, h, dtype=dtype, device=device) / h,
+            torch.linspace(0.5, w - 0.5, w, dtype=dtype, device=device) / w,
+            indexing="ij",
+        )
+        ref = torch.stack((ref_x, ref_y), -1).reshape(1, h * w, 1, 2)  # [1, H*W, 1, 2]
+        return ref.expand(bs, -1, 1, -1)  # [B, H*W, 1, 2]
+
+
+class _DeformAttnLayer(nn.Module):
+    """Single deformable cross-attention + FFN layer."""
+
+    def __init__(self, d_model, d_ffn, n_heads, n_points):
+        super(_DeformAttnLayer, self).__init__()
+        from deformattn.modules import MSDeformAttn
+
+        self.cross_attn = MSDeformAttn(d_model, n_levels=1, n_heads=n_heads, n_points=n_points)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.linear1 = nn.Linear(d_model, d_ffn)
+        self.linear2 = nn.Linear(d_ffn, d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.act = nn.ReLU(inplace=True)
+
+    def forward(self, query, src, reference_points, spatial_shapes, level_start_index):
+        query = query + self.cross_attn(query, reference_points, src, spatial_shapes, level_start_index)
+        query = self.norm1(query)
+        query = query + self.linear2(self.act(self.linear1(query)))
+        query = self.norm2(query)
+        return query
+
+
 class BilinearSample(nn.Module):
     def __init__(self, scale_rate):
         super(BilinearSample, self).__init__()

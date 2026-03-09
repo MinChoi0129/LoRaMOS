@@ -4,7 +4,7 @@
 # FarMOS Prediction (save .label files)
 # ============================================================
 
-EXP_ID="Exp16"
+EXP_ID="Exp17"
 
 # Mode: "val" = seq 08, "test" = seq 11-21
 MODE="val"

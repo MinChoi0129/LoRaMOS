@@ -64,6 +64,21 @@ class FarMOS(nn.Module):
         self.unproject_from_full = projector_unprojector.unprojectors["full"]  # T축 없어야함
         self.unproject_from_half = projector_unprojector.unprojectors["half"]  # T축 없어야함
 
+    def _range_balanced_indices(self, dist_1d):
+        """단일 샘플의 거리 기반 균등 샘플링 인덱스 반환."""
+        samples_per_bin = 2000
+        bin_edges = [0, 10, 20, 30, 40, 50]
+        indices = []
+        for i in range(len(bin_edges) - 1):
+            bin_idx = ((dist_1d >= bin_edges[i]) & (dist_1d < bin_edges[i + 1])).nonzero(as_tuple=False).squeeze(-1)
+            if len(bin_idx) == 0:
+                continue
+            if len(bin_idx) > samples_per_bin:
+                perm = torch.randperm(len(bin_idx), device=bin_idx.device)[:samples_per_bin]
+                bin_idx = bin_idx[perm]
+            indices.append(bin_idx)
+        return torch.cat(indices)
+
     def get_loss(self, pred, label, mode, dist=None):
         if mode == "moving":
             B, C = pred.shape[0], pred.shape[1]
@@ -71,13 +86,21 @@ class FarMOS(nn.Module):
             pred = pred.view(B, C, -1).unsqueeze(-1)
             label = label.view(B, -1).unsqueeze(-1)
 
+            # Range-balanced sampling (train only): 배치별 독립 계산 후 평균
+            if self.training:
+                nll_sum, lovasz_sum = 0.0, 0.0
+                for b in range(B):
+                    idx = self._range_balanced_indices(dist[b])
+                    p = pred[b:b+1, :, idx, :]
+                    l = label[b:b+1, idx, :]
+                    per_point_nll = self.moving_nll_loss(F.log_softmax(p, dim=1).double(), l)
+                    valid = (l != 0).float()
+                    nll_sum += (per_point_nll * valid.double()).sum() / (valid.sum() + 1e-6)
+                    lovasz_sum += self.lovasz_loss(p, l.long(), ignore=0)
+                return (nll_sum / B).float() + lovasz_sum / B
+
             # Per-point NLL (reduction='none') → [B, N, 1]
             per_point_nll = self.moving_nll_loss(F.log_softmax(pred, dim=1).double(), label)
-
-            # 거리 제곱 가중치: 멀리 있는 점일수록 더 큰 페널티
-            dist_w = dist.view(B, -1, 1) ** 2  # [B, N, 1]
-            dist_w = dist_w / (dist_w.mean() + 1e-6)  # 정규화
-            per_point_nll = per_point_nll * dist_w.double()
 
             # ignore_index=0인 점 제외하고 평균
             valid = (label != 0).float()
