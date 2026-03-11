@@ -5,8 +5,8 @@ import yaml
 import numpy as np
 from torch.utils.data import Dataset
 
-from datasets.config import TASK_CONFIG_PATH, STATIC_FRAMES_PATH
-from datasets.augmentation import DataAugment
+from datasets.config import TASK_CONFIG_PATH, STATIC_FRAMES_PATH, OBJECT_BANK_DIR
+from datasets.augmentation import DataAugment, SequenceCopyPaste
 from datasets.pointcloud import parse_calibration, parse_poses
 from datasets.preprocessing import (
     build_sequence_filelist,
@@ -33,6 +33,7 @@ class DataloadTrain(Dataset):
 
         self.movable_learning_map = self.task_cfg["movable_learning_map"]
         self.augmentor = DataAugment()
+        # self.copy_paste = SequenceCopyPaste(OBJECT_BANK_DIR, paste_max_obj_num=3)
 
         train_sequences = [str(s).zfill(2) for s in self.task_cfg["split"]["train"]]
         for seq_id in train_sequences:
@@ -76,14 +77,22 @@ class DataloadTrain(Dataset):
     def __getitem__(self, index):
         meta_list = self.flist[index]
 
-        point_clouds, label_list, movable_label_list = load_sequence_with_labels(
+        point_clouds, label_list, movable_label_list, raw_semantic_list = load_sequence_with_labels(
             meta_list, self.task_cfg["learning_map"], self.movable_learning_map
         )
-        point_clouds, label_list, movable_label_list, _ = pad_to_max(point_clouds, label_list, movable_label_list)
+        # point_clouds, label_list, movable_label_list = self.copy_paste(
+        #     point_clouds, label_list, movable_label_list, raw_semantic_list
+        # )
+        point_clouds, label_list, movable_label_list, valid_point_counts = pad_to_max(
+            point_clouds, label_list, movable_label_list
+        )
+
         xyzi, des_coord, sph_coord, spherical_coords_raw, rv_input = build_tensors(point_clouds, augmentor=self.augmentor)
+        num_valid_t0 = valid_point_counts[-1]
+
         label_3d, label_2d = build_label_tensors(label_list, spherical_coords_raw, movable_label_list)
 
-        return xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d
+        return xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid_t0
 
     def __len__(self):
         return len(self.flist)
@@ -116,7 +125,7 @@ class DataloadVal(Dataset):
     def __getitem__(self, index):
         meta_list = self.flist[index]
 
-        point_clouds, label_list, movable_label_list = load_sequence_with_labels(
+        point_clouds, label_list, movable_label_list, _ = load_sequence_with_labels(
             meta_list, self.task_cfg["learning_map"], self.movable_learning_map
         )
         point_clouds, label_list, movable_label_list, valid_point_counts = pad_to_max(

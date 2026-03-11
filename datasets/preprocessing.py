@@ -25,6 +25,7 @@ from datasets.pointcloud import (
     generate_rv_features,
     generate_rv_label,
 )
+from utils.pretty_printer_and_saver import shprint
 
 
 # ============================================================
@@ -77,6 +78,8 @@ def load_sequence_with_labels(meta_list, learning_map, movable_learning_map=None
     label_list = []
     movable_label_list = [] if movable_learning_map is not None else None
 
+    raw_semantic_list = []
+
     for frame_meta in meta_list:
         fname_pcd, fname_label, pose_diff, _, _ = frame_meta
 
@@ -86,6 +89,7 @@ def load_sequence_with_labels(meta_list, learning_map, movable_learning_map=None
 
         raw_label = np.fromfile(fname_label, dtype=np.uint32).reshape(-1)
         semantic_label = raw_label & 0xFFFF
+        raw_semantic_list.append(semantic_label.copy())
         remapped_label = relabel(semantic_label, learning_map)
         label_list.append(remapped_label)
 
@@ -93,7 +97,7 @@ def load_sequence_with_labels(meta_list, learning_map, movable_learning_map=None
             movable_label = relabel(semantic_label, movable_learning_map)
             movable_label_list.append(movable_label)
 
-    return point_clouds, label_list, movable_label_list
+    return point_clouds, label_list, movable_label_list, raw_semantic_list
 
 
 def load_sequence_without_labels(meta_list):

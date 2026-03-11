@@ -138,13 +138,19 @@ if __name__ == "__main__":
         ep_loss, ep_mov, ep_mbl, n = 0.0, 0.0, 0.0, 0
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg['epochs']}", dynamic_ncols=True)
-        for xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d in pbar:
-            xyzi, des_coord, sph_coord = xyzi.cuda(), des_coord.cuda(), sph_coord.cuda()
-            rv_input = rv_input.cuda()
-            label_3d, label_2d = label_3d.cuda(), label_2d.cuda()
+        for xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid_t0 in pbar:
+            xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid_t0 = (
+                xyzi.cuda(),
+                des_coord.cuda(),
+                sph_coord.cuda(),
+                rv_input.cuda(),
+                label_3d.cuda(),
+                label_2d.cuda(),
+                num_valid_t0.cuda(),
+            )
 
             optimizer.zero_grad()
-            out = model(xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d)
+            out = model(xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid_t0)
             out["loss"].backward()
             optimizer.step()
 
