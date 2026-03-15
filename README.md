@@ -1,21 +1,17 @@
-# FarMOS (Temporary Title)
+# FarMOS
 
 LiDAR 포인트 클라우드 기반 Moving Object Segmentation (MOS).
 BEV + RV dual-branch 구조와 Deformable Attention으로 원거리 이동 객체까지 탐지.
 
 ---
 
-## 1. Environment
-
-### Python & PyTorch
+## Environment
 
 ```bash
 conda create -n farmos python=3.9 -y
 conda activate farmos
 
-# Blackwell Architecture 지원
 pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-
 pip install -r requirements.txt
 ```
 
@@ -28,13 +24,14 @@ cd ..
 ```
 
 빌드 확인:
+
 ```bash
 python -c "from deformattn.modules import MSDeformAttn; print('OK')"
 ```
 
 ---
 
-## 2. Dataset
+## Dataset
 
 SemanticKITTI dataset을 사용한다.
 
@@ -72,7 +69,7 @@ sequence_dir: "/path/to/sequences/"
 
 ---
 
-## 3. Training
+## Training
 
 ### 새 실험 시작
 
@@ -90,7 +87,7 @@ bash scripts/train.sh
 
 ```bash
 MODE="keep"
-RESUME_EXP="Exp18"   # 이어서 학습할 실험 번호
+RESUME_EXP="Exp18"
 ```
 
 ```bash
@@ -113,13 +110,29 @@ bash scripts/train.sh
 | 항목 | 값 |
 |------|-----|
 | MAX_POINTS | 160,000 |
-| NUM_TEMPORAL_FRAMES | 5 |
-| BEV Grid | 512 x 512 x 30 |
-| RV Grid | 64 x 2048 x 30 |
+| NUM_TEMPORAL_FRAMES | 8 |
+| BEV Grid (H, W, D) | 512 x 512 x 30 |
+| BEV Range | X: [-50, 50], Y: [-50, 50], Z: [-4, 2] |
+| RV Grid (H, W, D) | 64 x 2048 x 50 |
+| RV Range | Phi: [-180, 180]°, Theta: [-25, 3]°, R: [2, 50]m |
+
+### Checkpointing
+
+학습 중 자동 저장되는 체크포인트:
+
+| 파일 | 기준 |
+|------|------|
+| `latest.pth` | 매 epoch |
+| `best_*.pth` | best overall moving IoU |
+| `best_0_10m_*.pth` | best 0-10m moving IoU |
+| `best_10_20m_*.pth` | best 10-20m moving IoU |
+| `best_20_30m_*.pth` | best 20-30m moving IoU |
+| `best_30_40m_*.pth` | best 30-40m moving IoU |
+| `best_40_50m_*.pth` | best 40-50m moving IoU |
 
 ---
 
-## 4. Validation (Prediction 저장)
+## Validation (Prediction 저장)
 
 `scripts/val.sh`에서 `EXP_ID`, `MODE` 설정 후:
 
@@ -133,7 +146,7 @@ bash scripts/val.sh
 
 ---
 
-## 5. Evaluation (IoU 계산)
+## Evaluation (IoU 계산)
 
 `scripts/eval.sh`에서 `EXP_ID`, `SEQUENCES` 설정 후:
 
@@ -146,7 +159,7 @@ bash scripts/eval.sh
 
 ---
 
-## 6. Speed Benchmark
+## Speed Benchmark
 
 ```bash
 bash scripts/speed.sh
@@ -154,7 +167,7 @@ bash scripts/speed.sh
 
 ---
 
-## 7. Visualization
+## Visualization
 
 `scripts/visualize.sh`에서 `EXP_ID`, `FRAME_ID` 설정 후:
 
@@ -162,60 +175,5 @@ bash scripts/speed.sh
 bash scripts/visualize.sh
 ```
 
----
+`infer()`가 반환하는 중간 피처들 (`visualization` key)이 자동으로 `images/` 디렉토리에 저장된다.
 
-## 8. Weights Download
-
-```
-https://
-```
-
----
-
-## Project Structure
-
-```
-FarMOS/
-├── FarMOS_train.py              # 학습
-├── FarMOS_valid.py              # Prediction 저장
-├── FarMOS_eval.py               # IoU 평가
-├── FarMOS_speed.py              # 속도 벤치마크
-├── FarMOS_visualization.py      # 시각화
-├── config/
-│   ├── train.yaml               # 학습 하이퍼파라미터
-│   └── semantic-kitti-mos.yaml  # 클래스 정의, split, learning map
-├── networks/
-│   ├── MainNetwork.py           # FarMOS 전체 모델
-│   ├── SubNetworks.py           # BEVNet, RVNet
-│   ├── backbone_BEV.py          # BEV backbone (DeformAttnBottleneck 포함)
-│   └── backbone_RV.py           # RV backbone
-├── datasets/
-│   ├── config.py                # 데이터 상수 (MAX_POINTS, grid size 등)
-│   ├── dataloader.py            # Train/Val/Test Dataset
-│   ├── preprocessing.py         # 텐서 변환, 패딩
-│   ├── pointcloud.py            # 좌표 변환, quantization
-│   └── augmentation.py          # 학습 augmentation
-├── utils/
-│   ├── builder.py               # optimizer, scheduler, dataloader 생성
-│   ├── metrics.py               # iouEval
-│   ├── logger.py                # Logger, wandb 연동
-│   ├── checkpoint.py            # 체크포인트 저장/로드
-│   └── projector_unprojector.py # BEV/RV ↔ 3D 변환
-├── deformattn/                  # Deformable Attention CUDA extension
-│   ├── setup.py
-│   ├── src/
-│   ├── functions/
-│   └── modules/
-├── scripts/
-│   ├── train.sh
-│   ├── val.sh
-│   ├── eval.sh
-│   ├── speed.sh
-│   └── visualize.sh
-└── logs/                        # 실험 결과 (자동 생성)
-    └── ExpXX/
-        ├── checkpoints/
-        ├── predictions/
-        ├── code_snapshot/
-        └── wandb/
-```
