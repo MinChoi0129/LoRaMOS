@@ -4,8 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import yaml
 from networks import backbone_moving, loss, SubNetworks
-from utils.pretty_printer_and_saver import save_feature_as_img, shprint
-from utils import projector_unprojector as pi_unpi
+from utils.projector_unprojector import project, unproject
 from datasets.config import NUM_TEMPORAL_FRAMES
 
 
@@ -25,7 +24,6 @@ class FarMOS(nn.Module):
         self.pointnet = backbone_moving.PointNetStacker(7, self.pointnet_ch, pre_bn=True, stack_num=2)
         self.moving_net = SubNetworks.MovingNet(in_channels=NUM_TEMPORAL_FRAMES * self.pointnet_ch)
         self.movable_net = SubNetworks.MovableNet()
-        # self.point_fuse = backbone_moving.CatFusion([self.pointnet_ch, 32, 32, 3], 3)
         self.point_fuse = backbone_moving.CatFusion([self.pointnet_ch, 32, 3], 3)
 
         __print_num_params(self.pointnet, "pointnet")
@@ -55,7 +53,7 @@ class FarMOS(nn.Module):
         self.movable_nll_loss = nn.NLLLoss(weight=movable_loss_w.double(), ignore_index=0)
         self.lovasz_loss = loss.lovasz_softmax
 
-    def get_loss(self, pred, label, mode, dist=None, num_valid=None):
+    def get_loss(self, pred, label, mode, num_valid=None):
         if mode == "moving":
             B, C = pred.shape[0], pred.shape[1]
             N = pred.shape[2]
@@ -65,33 +63,11 @@ class FarMOS(nn.Module):
 
             per_point_nll = self.moving_nll_loss(F.log_softmax(pred, dim=1).double(), label)
 
-            # 1. 거리 기반 가중치 (선형 비례)
-            dist_w = dist.view(B, N, 1).clone()  # [B, N, 1]
-
-            # 2. Graph Break 없는 순수 텐서 마스킹 (Broadcasting 활용)
-            if num_valid is not None:
-                # [1, N, 1] 크기의 인덱스 텐서 생성
-                seq_range = torch.arange(N, device=dist.device).view(1, N, 1)
-                # [B, 1, 1] 크기의 num_valid와 비교하여 [B, N, 1] boolean 마스크 생성
-                valid_mask = seq_range < num_valid.view(B, 1, 1)
-
-                # 패딩 영역 0으로 마스킹
-                dist_w = dist_w * valid_mask.float()
-
-                # 유효한 영역만의 평균 계산 (sum / count)
-                valid_sum = dist_w.sum(dim=1, keepdim=True)  # [B, 1, 1]
-                valid_count = num_valid.view(B, 1, 1).float() + 1e-6  # [B, 1, 1]
-                valid_mean = valid_sum / valid_count  # [B, 1, 1]
-            else:
-                valid_mean = dist_w.mean(dim=1, keepdim=True) + 1e-6
-
-            # 3. 정규화 및 가중치 곱하기
-            dist_w = dist_w / valid_mean
-            per_point_nll = per_point_nll * dist_w.double()
-
-            # 4. 최종 Loss 계산
+            # num_valid 마스킹: 패딩 영역 제외
             target_valid = (label != 0).float()
             if num_valid is not None:
+                seq_range = torch.arange(N, device=pred.device).view(1, N, 1)
+                valid_mask = seq_range < num_valid.view(B, 1, 1)
                 target_valid = target_valid * valid_mask.float()
 
             l_nll = (per_point_nll * target_valid.double()).sum() / (target_valid.sum() + 1e-6)
@@ -107,16 +83,13 @@ class FarMOS(nn.Module):
 
             return l_nll + l_lovasz
 
-    def infer(self, xyzi, des_coord, sph_coord, rv_input):
-        # **************** [ Step 0: shape, time 추출 ] ****************
+    def infer(self, xyzi, bev_coord, rv_coord, rv_input):
+        # **************** [ Step 0: shape, time, 좌표 추출 ] ****************
         B, T, C, N, _ = xyzi.shape
-        bev_coord_t0 = des_coord[:, -1, :, :2, :]  # [B, N, 2, 1]
-        rv_coords_t0 = sph_coord[:, -1, :, :2, :].flip(-2)  # [B, N, 2, 1]
 
         # **************** [ Step 1: Point Feature 추출 ] ****************
         # 패딩 포인트 마스킹 (BatchNorm 오염 방지)
-        # Channel 4 = distance. 패딩 포인트: ~4243
-        valid_mask = (xyzi[:, :, 4:5, :, :] < 100.0).float()  # [B, T=3, 1, N, 1]
+        valid_mask = (xyzi[:, :, 4:5, :, :] < 100.0).float()  # [B, T, 1, N, 1]
         valid_mask_flat = valid_mask.view(B * T, 1, N, 1)  # [B*T, 1, N, 1]
         xyzi = xyzi * valid_mask  # [B, T, 7, N, 1]
         xyzi_flatten = xyzi.view(B * T, C, N, 1)  # [B*T, 7, N, 1]
@@ -126,51 +99,42 @@ class FarMOS(nn.Module):
         pcd_feat_t0 = pcd_feat.view(B, T, 64, N, 1)[:, -1]  # [B, 64, N, 1]
 
         # **************** [ Step 2: Semantic 힌트 생성 ] ***************
-        movable_logit_rv = self.movable_net(rv_input)  # [B, K=3, H=64, W=2048]
-        movable_logit_as_3d = pi_unpi.unprojectors["full"](movable_logit_rv, rv_coords_t0)  # [B, K=3, N, 1]
-        movable_logit_as_bev = pi_unpi.project_without_time_stack(
-            movable_logit_as_3d, bev_coord_t0, 512, 512
-        )  # [B, K=3, 512, 512]
+        movable_logit_rv = self.movable_net(rv_input)  # [B, K=3, 64, 2048]
+        movable_logit_as_3d = unproject(movable_logit_rv, rv_coord[:, -1], scale=1.0)  # [B, K=3, N, 1]
 
-        movable_probability_as_bev = torch.softmax(movable_logit_as_bev, dim=1)  # [B, K=3, 512, 512]
-        movable_probability_mask_bev = movable_probability_as_bev[:, 2:3, :, :].detach()  # [B, p=1, 512, 512] => 객체 존재 확률
-        # movable_probability_as_rv = torch.softmax(movable_logit_rv, dim=1)  # [B, K=3, H=64, W=2048]
-        # movable_probability_mask_rv = movable_probability_as_rv[:, 2:3, :, :].detach()  # [B, p=1, 64, 2048] => 객체 존재 확률
+        # Movable logit → BEV (softmax → 객체 존재 확률 마스크)
+        movable_logit_as_bev = project(movable_logit_as_3d, bev_coord[:, -1], view="bev")  # [B, K=3, H, W]
+        movable_prob_bev = torch.softmax(movable_logit_as_bev, dim=1)
+        movable_mask_bev = movable_prob_bev[:, 2:3, :, :].detach()  # [B, 1, H, W]
 
-        # **************** [ Step 3: Dual Branch Moving 예측 생성 ] ****************
-        moving_feat_3d_bev = self.moving_net(pcd_feat, des_coord, movable_probability_mask_bev)  # [B, 32, N, 1]
-        # moving_feat_3d_bev, moving_feat_3d_rv = self.moving_net(
-        #     pcd_feat,
-        #     des_coord,
-        #     sph_coord,
-        #     movable_probability_mask_bev,
-        #     movable_probability_mask_rv,
-        # )  # [B, 32, N, 1], [B, 32, N, 1]
+        # **************** [ Step 3: BEV Moving 예측 생성 ] ****************
+        bev_input = project(pcd_feat, bev_coord, view="bev")  # [B, T*64, H, W]
+
+        moving_feat_bev = self.moving_net(bev_input, movable_mask_bev)  # [B, 32, H, W]
+        moving_feat_3d = unproject(moving_feat_bev, bev_coord[:, -1], scale=1.0)  # [B, 32, N, 1]
 
         # **************** [ Step 4: 3차원 피처 모두 융합 ] ****************
-        moving_logit_3d = self.point_fuse(pcd_feat_t0, moving_feat_3d_bev, movable_logit_as_3d.detach())  # [B, K=3, N, 1]
-        # moving_logit_3d = self.point_fuse(
-        #     pcd_feat_t0,
-        #     moving_feat_3d_bev,
-        #     moving_feat_3d_rv,
-        #     movable_logit_as_3d.detach(),
-        # )  # [B, K=3, N, 1]
+        moving_logit_3d = self.point_fuse(pcd_feat_t0, moving_feat_3d, movable_logit_as_3d.detach())  # [B, K=3, N, 1]
 
-        RUN_SAVE_FEATURE = False
-        if RUN_SAVE_FEATURE:
-            save_feature_as_img(
-                [],
-                [],
-                "max",
-            )
+        return {
+            "moving_logit_3d": moving_logit_3d,
+            "movable_logit_2d": movable_logit_rv,
+            "visualization": [
+                (movable_logit_rv, "movable_logit_rv"),
+                (movable_logit_as_bev, "movable_logit_bev"),
+                (movable_mask_bev, "movable_mask_bev"),
+                (bev_input, "bev_input"),
+                (moving_feat_bev, "moving_feat_bev"),
+            ],
+        }
 
-        return moving_logit_3d, movable_logit_rv
+    def forward(self, xyzi, bev_coord, rv_coord, rv_input, current_moving_label_3d, current_movable_label_2d, num_valid_t0):
+        output = self.infer(xyzi, bev_coord, rv_coord, rv_input)
 
-    def forward(self, xyzi, des_coord, sph_coord, rv_input, current_moving_label_3d, current_movable_label_2d, num_valid_t0):
-        moving_logit_3d, movable_logit_2d = self.infer(xyzi, des_coord, sph_coord, rv_input)
+        moving_logit_3d = output["moving_logit_3d"]
+        movable_logit_2d = output["movable_logit_2d"]
 
-        dist_t0 = xyzi[:, -1, 4, :, 0]  # [B, N] — channel 4 = distance
-        loss_moving = self.get_loss(moving_logit_3d, current_moving_label_3d, mode="moving", dist=dist_t0, num_valid=num_valid_t0)
+        loss_moving = self.get_loss(moving_logit_3d, current_moving_label_3d, mode="moving", num_valid=num_valid_t0)
         loss_movable = self.get_loss(movable_logit_2d, current_movable_label_2d, mode="movable")
         loss = loss_moving + loss_movable
 
@@ -202,25 +166,15 @@ if __name__ == "__main__":
 
     # Load real data once from dataloader
     print("Loading sample from dataloader...")
-    for xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid_t0 in loader:
+    for xyzi, bev_coord, rv_coord, rv_input, label_3d, label_2d, num_valid_t0 in loader:
         xyzi = xyzi.to(device)
-        des_coord = des_coord.to(device)
-        sph_coord = sph_coord.to(device)
+        bev_coord = bev_coord.to(device)
+        rv_coord = rv_coord.to(device)
         rv_input = rv_input.to(device)
         label_3d = label_3d.to(device)
         label_2d = label_2d.to(device)
         num_valid_t0 = num_valid_t0.to(device)
 
-        shprint(xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid_t0)
-        print(
-            xyzi.device,
-            des_coord.device,
-            sph_coord.device,
-            rv_input.device,
-            label_3d.device,
-            label_2d.device,
-            num_valid_t0.device,
-        )
-        output = model(xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid_t0)
+        output = model(xyzi, bev_coord, rv_coord, rv_input, label_3d, label_2d, num_valid_t0)
         print("Forward Pass Successful! Loss:", output["loss"].item())
         break

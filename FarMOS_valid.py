@@ -41,15 +41,15 @@ def run_predict(args, model, task_cfg, loader, desc):
     with torch.no_grad():
         for batch in tqdm(loader, desc=desc, dynamic_ncols=True):
             if args.mode == "val":
-                xyzi, des_coord, sph_coord, rv_input, _, _, num_valid, seq_ids, file_ids = batch
+                xyzi, bev_coord, rv_coord, rv_input, _, _, num_valid, seq_ids, file_ids = batch
             else:
-                xyzi, des_coord, sph_coord, rv_input, num_valid, seq_ids, file_ids = batch
+                xyzi, bev_coord, rv_coord, rv_input, num_valid, seq_ids, file_ids = batch
 
-            xyzi, des_coord, sph_coord = xyzi.cuda(), des_coord.cuda(), sph_coord.cuda()
+            xyzi, bev_coord, rv_coord = xyzi.cuda(), bev_coord.cuda(), rv_coord.cuda()
             rv_input = rv_input.cuda()
 
-            moving_logit_3d, _ = model.infer(xyzi, des_coord, sph_coord, rv_input)
-            pred_cls = moving_logit_3d.squeeze(-1).argmax(dim=1).cpu().numpy()
+            output = model.infer(xyzi, bev_coord, rv_coord, rv_input)
+            pred_cls = output["moving_logit_3d"].squeeze(-1).argmax(dim=1).cpu().numpy()
 
             for b in range(pred_cls.shape[0]):
                 save_predictions(pred_cls[b], num_valid[b].item(), seq_ids[b], file_ids[b], args.pred_dir, inv_map)

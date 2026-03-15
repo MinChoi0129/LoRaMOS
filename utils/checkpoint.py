@@ -8,7 +8,7 @@ def _strip_compile_prefix(state_dict):
     return {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
 
 
-def save_checkpoint(model, optimizer, scheduler, epoch, path, best_moving_iou=0.0):
+def save_checkpoint(model, optimizer, scheduler, epoch, path, best_ious=None):
     """Save checkpoint with clean (non-compiled) state_dict keys."""
     torch.save(
         {
@@ -16,7 +16,7 @@ def save_checkpoint(model, optimizer, scheduler, epoch, path, best_moving_iou=0.
             "model_state_dict": _strip_compile_prefix(model.state_dict()),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
-            "best_moving_iou": best_moving_iou,
+            "best_ious": best_ious or {},
         },
         path,
     )
@@ -36,21 +36,35 @@ def load_checkpoint(model, path, device="cuda"):
     return ckpt
 
 
-def save_best_checkpoint(model, optimizer, scheduler, epoch, ckpt_dir, current_iou, best_iou, logger=None):
+def save_best_checkpoint(model, optimizer, scheduler, epoch, ckpt_dir, current_iou, best_iou, logger=None, tag="best"):
     """Save best model if current_iou > best_iou. Returns updated best_iou."""
     if current_iou <= best_iou:
         return best_iou
 
     best_iou = current_iou
 
-    # Remove previous best_*.pth
-    for old in glob.glob(os.path.join(ckpt_dir, "best_*.pth")):
+    # Remove previous {tag}_*.pth
+    for old in glob.glob(os.path.join(ckpt_dir, f"{tag}_*.pth")):
         os.remove(old)
 
-    best_path = os.path.join(ckpt_dir, f"best_{epoch}.pth")
-    save_checkpoint(model, optimizer, scheduler, epoch, best_path, best_iou)
+    best_path = os.path.join(ckpt_dir, f"{tag}_{epoch}.pth")
+    save_checkpoint(model, optimizer, scheduler, epoch, best_path)
 
     if logger:
-        logger.log(f"  -> New best model saved: {best_path} (iou_moving: {best_iou:.6f})")
+        logger.log(f"  -> New {tag} model saved: {best_path} (iou: {best_iou:.6f})")
 
     return best_iou
+
+
+def save_all_best_checkpoints(model, optimizer, scheduler, epoch, ckpt_dir, val, best_ious, range_bins, logger):
+    """Save latest + best overall + best per range bin."""
+    save_checkpoint(model, optimizer, scheduler, epoch, os.path.join(ckpt_dir, "latest.pth"), best_ious)
+    best_ious["moving"] = save_best_checkpoint(
+        model, optimizer, scheduler, epoch, ckpt_dir, val["iou_moving"], best_ious["moving"], logger, tag="best"
+    )
+    for rmin, rmax in range_bins:
+        key = f"{rmin}_{rmax}m"
+        best_ious[key] = save_best_checkpoint(
+            model, optimizer, scheduler, epoch, ckpt_dir,
+            val[f"iou_moving_{rmin}_{rmax}m"], best_ious[key], logger, tag=f"best_{key}"
+        )

@@ -3,12 +3,12 @@ import torch
 from networks.MainNetwork import FarMOS
 from datasets.dataloader import DataloadVal
 from utils.checkpoint import load_checkpoint
-from utils.projector_unprojector import project_to_bev, project_to_rv, unprojectors
+from utils.projector_unprojector import project, unproject
 from utils.pretty_printer_and_saver import save_feature_as_img
 
 
 def get_args():
-    parser = argparse.ArgumentParser("FarMOS Speed Benchmark")
+    parser = argparse.ArgumentParser("FarMOS Visualization")
     parser.add_argument("--sequence_dir", type=str, required=True)
     parser.add_argument("--frame_id", type=int, default=4017)
     parser.add_argument("--checkpoint", type=str, required=True)
@@ -19,35 +19,31 @@ if __name__ == "__main__":
     args = get_args()
     device = torch.device("cuda")
 
-    # Dataset
-    # dataset = DataloadTrain(args.sequence_dir)
     dataset = DataloadVal(args.sequence_dir)
 
     (
-        xyzi,  # [T, 7, N, 1]
-        des_coord,  # [T, N, 3, 1]
-        sph_coord,  # [T, N, 3, 1]
-        rv_input,  # [5, 64, 2048]
-        moving_label_3d,  # [N]
-        movable_label_2d,  # [64, 2048]
-        num_valid_t0,  # int
-        current_seq_id,  # str
-        current_file_id,  # str
+        xyzi,
+        bev_coord,
+        rv_coord,
+        rv_input,
+        moving_label_3d,
+        movable_label_2d,
+        num_valid_t0,
+        current_seq_id,
+        current_file_id,
     ) = dataset[args.frame_id]
 
     # Add batch dimension
     xyzi = xyzi.unsqueeze(0).to(device)
-    des_coord = des_coord.unsqueeze(0).to(device)
-    sph_coord = sph_coord.unsqueeze(0).to(device)
+    bev_coord = bev_coord.unsqueeze(0).to(device)
+    rv_coord = rv_coord.unsqueeze(0).to(device)
     rv_input = rv_input.unsqueeze(0).to(device)
     moving_label_3d = moving_label_3d.unsqueeze(0).to(device)
     movable_label_rv = movable_label_2d.unsqueeze(0).to(device)
 
-    # Generate else label
-    moving_label_bev = project_to_bev(moving_label_3d.view(1, 1, -1, 1), des_coord[:, -1:])
-    moving_label_rv = project_to_rv(moving_label_3d.view(1, 1, -1, 1), sph_coord[:, -1])
-    movable_label_3d = unprojectors["full"](movable_label_rv.unsqueeze(1).float(), sph_coord[:, -1, :, :2, :].flip(-2))
-    movable_label_bev = project_to_bev(movable_label_3d, des_coord[:, -1:])
+    # Generate label views
+    moving_label_bev = project(moving_label_3d.view(1, 1, -1, 1), bev_coord[:, -1], view="bev")
+    moving_label_rv = project(moving_label_3d.view(1, 1, -1, 1), rv_coord[:, -1], view="rv")
 
     # Model
     model = FarMOS().to(device)
@@ -59,11 +55,16 @@ if __name__ == "__main__":
         print("모델 구조가 달라 그냥 현재 구조로 진행합니다")
 
     with torch.no_grad():
+        # Labels
         save_feature_as_img(
-            [moving_label_bev, moving_label_rv, movable_label_bev, movable_label_rv],
-            ["moving_label_bev", "moving_label_rv", "movable_label_bev", "movable_label_rv"],
+            [moving_label_bev, moving_label_rv, movable_label_rv],
+            ["moving_label_bev", "moving_label_rv", "movable_label_rv"],
             "max",
         )
-        print("Label Saved.")
-        model.infer(xyzi, des_coord, sph_coord, rv_input)
-        print("Feature Saved.")
+        print("Label saved.")
+
+        # Inference + intermediate features
+        output = model.infer(xyzi, bev_coord, rv_coord, rv_input)
+        tensors, names = zip(*output["visualization"])
+        save_feature_as_img(list(tensors), list(names), "max")
+        print("Feature saved.")

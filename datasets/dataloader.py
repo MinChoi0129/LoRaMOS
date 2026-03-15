@@ -10,10 +10,9 @@ from datasets.augmentation import DataAugment, SequenceCopyPaste
 from datasets.pointcloud import parse_calibration, parse_poses
 from datasets.preprocessing import (
     build_sequence_filelist,
-    load_sequence_with_labels,
-    load_sequence_without_labels,
+    load_sequence,
     pad_to_max,
-    build_tensors,
+    build_input_tensors,
     build_label_tensors,
 )
 
@@ -33,7 +32,7 @@ class DataloadTrain(Dataset):
 
         self.movable_learning_map = self.task_cfg["movable_learning_map"]
         self.augmentor = DataAugment()
-        # self.copy_paste = SequenceCopyPaste(OBJECT_BANK_DIR, paste_max_obj_num=3)
+        self.copy_paste = SequenceCopyPaste(OBJECT_BANK_DIR, paste_max_obj_num=3)
 
         train_sequences = [str(s).zfill(2) for s in self.task_cfg["split"]["train"]]
         for seq_id in train_sequences:
@@ -77,22 +76,22 @@ class DataloadTrain(Dataset):
     def __getitem__(self, index):
         meta_list = self.flist[index]
 
-        point_clouds, label_list, movable_label_list, raw_semantic_list = load_sequence_with_labels(
+        point_clouds, label_list, movable_label_list, raw_semantic_list = load_sequence(
             meta_list, self.task_cfg["learning_map"], self.movable_learning_map
         )
-        # point_clouds, label_list, movable_label_list = self.copy_paste(
-        #     point_clouds, label_list, movable_label_list, raw_semantic_list
-        # )
+        point_clouds, label_list, movable_label_list = self.copy_paste(
+            point_clouds, label_list, movable_label_list, raw_semantic_list
+        )
         point_clouds, label_list, movable_label_list, valid_point_counts = pad_to_max(
             point_clouds, label_list, movable_label_list
         )
 
-        xyzi, des_coord, sph_coord, spherical_coords_raw, rv_input = build_tensors(point_clouds, augmentor=self.augmentor)
+        xyzi, bev_coord, rv_coord, spherical_coords_raw, rv_input = build_input_tensors(point_clouds, augmentor=self.augmentor)
         num_valid_t0 = valid_point_counts[-1]
 
         label_3d, label_2d = build_label_tensors(label_list, spherical_coords_raw, movable_label_list)
 
-        return xyzi, des_coord, sph_coord, rv_input, label_3d, label_2d, num_valid_t0
+        return xyzi, bev_coord, rv_coord, rv_input, label_3d, label_2d, num_valid_t0
 
     def __len__(self):
         return len(self.flist)
@@ -125,13 +124,13 @@ class DataloadVal(Dataset):
     def __getitem__(self, index):
         meta_list = self.flist[index]
 
-        point_clouds, label_list, movable_label_list, _ = load_sequence_with_labels(
+        point_clouds, label_list, movable_label_list, _ = load_sequence(
             meta_list, self.task_cfg["learning_map"], self.movable_learning_map
         )
         point_clouds, label_list, movable_label_list, valid_point_counts = pad_to_max(
             point_clouds, label_list, movable_label_list
         )
-        xyzi, des_coord, sph_coord, spherical_coords_raw, rv_input = build_tensors(point_clouds)
+        xyzi, bev_coord, rv_coord, spherical_coords_raw, rv_input = build_input_tensors(point_clouds)
         moving_label_3d, movable_label_2d = build_label_tensors(label_list, spherical_coords_raw, movable_label_list)
 
         num_valid_t0 = valid_point_counts[-1]
@@ -140,8 +139,8 @@ class DataloadVal(Dataset):
 
         return (
             xyzi,
-            des_coord,
-            sph_coord,
+            bev_coord,
+            rv_coord,
             rv_input,
             moving_label_3d,
             movable_label_2d,
@@ -175,15 +174,15 @@ class DataloadTest(Dataset):
     def __getitem__(self, index):
         meta_list = self.flist[index]
 
-        point_clouds = load_sequence_without_labels(meta_list)
+        point_clouds, _, _, _ = load_sequence(meta_list)
         point_clouds, valid_point_counts = pad_to_max(point_clouds)
-        xyzi, des_coord, sph_coord, _, rv_input = build_tensors(point_clouds)
+        xyzi, bev_coord, rv_coord, _, rv_input = build_input_tensors(point_clouds)
 
         num_valid_t0 = valid_point_counts[-1]
         current_seq_id = meta_list[-1][2]
         current_file_id = meta_list[-1][3]
 
-        return xyzi, des_coord, sph_coord, rv_input, num_valid_t0, current_seq_id, current_file_id
+        return xyzi, bev_coord, rv_coord, rv_input, num_valid_t0, current_seq_id, current_file_id
 
     def __len__(self):
         return len(self.flist)

@@ -47,3 +47,32 @@ def log_wandb(metrics, step):
 
     metrics["epoch"] = step
     wandb.log(metrics)
+
+
+def log_epoch(logger, epoch, train_loss, train_mov, train_mbl, n, val, lr):
+    range_str = " | ".join(f"{k}: {val[k]:.4f}" for k in val if k.startswith("iou_moving_"))
+    logger.log(
+        f"[Epoch {epoch:03d}] Train: {train_loss/n:.4f} | "
+        f"Val: {val['loss']:.4f} (mov: {val['loss_moving']:.4f}, mbl: {val['loss_movable']:.4f}) | "
+        f"Moving IoU static: {val['iou_static']:.6f}, moving: {val['iou_moving']:.6f} | "
+        f"Movable IoU immovable: {val['iou_immovable']:.6f}, movable: {val['iou_movable']:.6f} | LR: {lr:.6f}\n"
+        f"  Range-wise Moving IoU: {range_str}"
+    )
+
+    wandb_dict = {
+        "train/loss": train_loss / n,
+        "train/loss_moving": train_mov / n,
+        "train/loss_movable": train_mbl / n,
+        "val/loss": val["loss"],
+        "val/loss_moving": val["loss_moving"],
+        "val/loss_movable": val["loss_movable"],
+        "val/iou_static": val["iou_static"],
+        "val/iou_moving": val["iou_moving"],
+        "val/iou_immovable": val["iou_immovable"],
+        "val/iou_movable": val["iou_movable"],
+        "lr": lr,
+    }
+    for k in val:
+        if k.startswith("iou_moving_"):
+            wandb_dict[f"val/{k}"] = val[k]
+    log_wandb(wandb_dict, step=epoch)

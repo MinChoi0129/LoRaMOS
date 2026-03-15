@@ -70,14 +70,16 @@ def relabel(raw_labels, label_map):
 
 
 def quantize_cartesian(points_xyzi, range_x, range_y, range_z, grid_size):
-    """3D 좌표 -> BEV 격자 인덱스로 양자화. Returns: [N, 3]"""
+    """3D 좌표 -> BEV 격자 인덱스로 양자화. Returns: [N, 3] — [col(x), row(y), depth(z)]"""
+    height, width, depth = grid_size
+
     x = points_xyzi[:, 0].copy()
     y = points_xyzi[:, 1].copy()
     z = points_xyzi[:, 2].copy()
 
-    dx = (range_x[1] - range_x[0]) / grid_size[0]
-    dy = (range_y[1] - range_y[0]) / grid_size[1]
-    dz = (range_z[1] - range_z[0]) / grid_size[2]
+    dx = (range_x[1] - range_x[0]) / width
+    dy = (range_y[1] - range_y[0]) / height
+    dz = (range_z[1] - range_z[0]) / depth
 
     x_quan = (x - range_x[0]) / dx
     y_quan = (y - range_y[0]) / dy
@@ -87,7 +89,7 @@ def quantize_cartesian(points_xyzi, range_x, range_y, range_z, grid_size):
 
 
 def quantize_spherical(points_xyzi, phi_range, theta_range, r_range, grid_size):
-    """3D 좌표 -> 구면 격자 인덱스로 양자화. Returns: [N, 3]"""
+    """3D 좌표 -> 구면 격자 인덱스로 양자화. Returns: [N, 3] — [col(phi), row(theta), depth(r)]"""
     height, width, depth = grid_size
 
     phi_rad_min = np.radians(phi_range[0])
@@ -110,7 +112,7 @@ def quantize_spherical(points_xyzi, phi_range, theta_range, r_range, grid_size):
 
     r_quan = (dist - r_range[0]) / dr
 
-    return np.stack((theta_quan, phi_quan, r_quan), axis=-1)
+    return np.stack((phi_quan, theta_quan, r_quan), axis=-1)
 
 
 # ============================================================
@@ -134,8 +136,8 @@ def generate_rv_label(spherical_coord_t0, label_t0, rv_height, rv_width):
     """3D 레이블 -> Range View 2D 레이블 (Painter's algorithm: nearest point 우선)"""
     label_2d = np.zeros((rv_height, rv_width), dtype=np.int64)
 
-    theta_idx = np.floor(spherical_coord_t0[:, 0]).astype(np.int64)
-    phi_idx = np.floor(spherical_coord_t0[:, 1]).astype(np.int64)
+    phi_idx = np.floor(spherical_coord_t0[:, 0]).astype(np.int64)
+    theta_idx = np.floor(spherical_coord_t0[:, 1]).astype(np.int64)
     depth = spherical_coord_t0[:, 2]
 
     valid = (theta_idx >= 0) & (theta_idx < rv_height) & (phi_idx >= 0) & (phi_idx < rv_width)
@@ -152,8 +154,8 @@ def generate_rv_features(points_xyzi_t0, spherical_coord_t0, rv_height, rv_width
     """3D 포인트 -> Range View 2D 피처맵 [5, H, W] (Painter's algorithm)"""
     rv_features = np.zeros((5, rv_height, rv_width), dtype=np.float32)
 
-    theta_idx = np.floor(spherical_coord_t0[:, 0]).astype(np.int64)
-    phi_idx = np.floor(spherical_coord_t0[:, 1]).astype(np.int64)
+    phi_idx = np.floor(spherical_coord_t0[:, 0]).astype(np.int64)
+    theta_idx = np.floor(spherical_coord_t0[:, 1]).astype(np.int64)
     depth = spherical_coord_t0[:, 2]
 
     valid = (theta_idx >= 0) & (theta_idx < rv_height) & (phi_idx >= 0) & (phi_idx < rv_width)

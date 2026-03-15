@@ -72,45 +72,39 @@ def build_sequence_filelist(sequence_dir, seq_id, poses, include_labels=True):
 # ============================================================
 
 
-def load_sequence_with_labels(meta_list, learning_map, movable_learning_map=None):
-    """T개 프레임의 포인트 클라우드 + 레이블 로드 (Train, Val 공용)"""
+def load_sequence(meta_list, learning_map=None, movable_learning_map=None):
+    """
+    T개 프레임의 포인트 클라우드 (+ 레이블) 로드.
+    meta 튜플 길이로 레이블 유무 자동 판별:
+      5-tuple: (fname_pcd, fname_label, pose_diff, seq_id, file_id)
+      4-tuple: (fname_pcd, pose_diff, seq_id, file_id)
+    """
     point_clouds = []
     label_list = []
-    movable_label_list = [] if movable_learning_map is not None else None
-
+    movable_label_list = []
     raw_semantic_list = []
 
+    has_labels = len(meta_list[0]) == 5
+
     for frame_meta in meta_list:
-        fname_pcd, fname_label, pose_diff, _, _ = frame_meta
+        if has_labels:
+            fname_pcd, fname_label, pose_diff, _, _ = frame_meta
+        else:
+            fname_pcd, pose_diff, _, _ = frame_meta
 
         raw_points = np.fromfile(fname_pcd, dtype=np.float32).reshape(-1, 4)
-        transformed_points = transform_points(raw_points, pose_diff)
-        point_clouds.append(transformed_points)
+        point_clouds.append(transform_points(raw_points, pose_diff))
 
-        raw_label = np.fromfile(fname_label, dtype=np.uint32).reshape(-1)
-        semantic_label = raw_label & 0xFFFF
-        raw_semantic_list.append(semantic_label.copy())
-        remapped_label = relabel(semantic_label, learning_map)
-        label_list.append(remapped_label)
+        if has_labels:
+            raw_label = np.fromfile(fname_label, dtype=np.uint32).reshape(-1)
+            semantic_label = raw_label & 0xFFFF
+            raw_semantic_list.append(semantic_label.copy())
+            label_list.append(relabel(semantic_label, learning_map))
 
-        if movable_learning_map is not None:
-            movable_label = relabel(semantic_label, movable_learning_map)
-            movable_label_list.append(movable_label)
+            if movable_learning_map is not None:
+                movable_label_list.append(relabel(semantic_label, movable_learning_map))
 
     return point_clouds, label_list, movable_label_list, raw_semantic_list
-
-
-def load_sequence_without_labels(meta_list):
-    """T개 프레임의 포인트 클라우드만 로드 (Test 전용)"""
-    point_clouds = []
-
-    for frame_meta in meta_list:
-        fname_pcd, pose_diff, _, _ = frame_meta
-        raw_points = np.fromfile(fname_pcd, dtype=np.float32).reshape(-1, 4)
-        transformed_points = transform_points(raw_points, pose_diff)
-        point_clouds.append(transformed_points)
-
-    return point_clouds
 
 
 # ============================================================
@@ -156,10 +150,10 @@ def pad_to_max(point_clouds, label_list=None, movable_label_list=None):
 # ============================================================
 
 
-def build_tensors(all_points, augmentor=None):
+def build_input_tensors(all_points, augmentor=None):
     """
     T개 프레임 -> 양자화 + 7채널 피쳐 -> 텐서 변환.
-    Returns: xyzi [T,7,N,1], des_coord [T,N,3,1], sph_coord [T,N,3,1],
+    Returns: xyzi [T,7,N,1], bev_coord [T,N,2], rv_coord [T,N,2],
              spherical_coords_raw [T*N,3], rv_input [5,H,W]
     """
     all_points_concat = np.concatenate(all_points, axis=0)
@@ -177,18 +171,19 @@ def build_tensors(all_points, augmentor=None):
     xyzi = xyzi.view(NUM_TEMPORAL_FRAMES, MAX_POINTS, 7, 1)
     xyzi = xyzi.permute(0, 2, 1, 3).contiguous()
 
-    des_coord = torch.FloatTensor(cartesian_coords.astype(np.float32))
-    des_coord = des_coord.view(NUM_TEMPORAL_FRAMES, MAX_POINTS, 3, 1)
+    # 좌표: [T, N, 2] — 항상 [col, row] 순서 (depth 제외)
+    bev_coord = torch.FloatTensor(cartesian_coords[:, :2].copy().astype(np.float32))
+    bev_coord = bev_coord.view(NUM_TEMPORAL_FRAMES, MAX_POINTS, 2)
 
-    sph_coord = torch.FloatTensor(spherical_coords.astype(np.float32))
-    sph_coord = sph_coord.view(NUM_TEMPORAL_FRAMES, MAX_POINTS, 3, 1)
+    rv_coord = torch.FloatTensor(spherical_coords[:, :2].copy().astype(np.float32))
+    rv_coord = rv_coord.view(NUM_TEMPORAL_FRAMES, MAX_POINTS, 2)
 
     points_xyzi_t0 = points_xyzi[-MAX_POINTS:]
     spherical_coords_t0 = spherical_coords[-MAX_POINTS:]
     rv_input = generate_rv_features(points_xyzi_t0, spherical_coords_t0, RV_GRID_SIZE[0], RV_GRID_SIZE[1])
     rv_input = torch.FloatTensor(rv_input)
 
-    return xyzi, des_coord, sph_coord, spherical_coords, rv_input
+    return xyzi, bev_coord, rv_coord, spherical_coords, rv_input
 
 
 def build_label_tensors(label_list, spherical_coords, movable_label_list):

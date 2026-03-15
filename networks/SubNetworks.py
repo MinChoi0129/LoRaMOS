@@ -3,22 +3,40 @@ import torch.nn as nn
 import torch.nn.functional as F
 from networks import backbone_moving
 from networks.backbone_movable import MetaKernel, ResContextBlock, ResBlock, UpBlock
-from utils import projector_unprojector as pi_unpi
 
 
-class BEVNet(nn.Module):
+class MovingNet(nn.Module):
+    """Cartesian BEV Encoder-Decoder."""
+
     def __init__(self, in_channels):
-        super(BEVNet, self).__init__()
+        super(MovingNet, self).__init__()
         block = backbone_moving.BasicBlock
 
         # ---- Encoder ----
         self.enc1 = self._make_layer(block, in_channels, 64, num_blocks=3, stride=2)  # → [B, 64, 256, 256]
         self.enc2 = self._make_layer(block, 64, 128, num_blocks=3, stride=2)  # → [B, 128, 128, 128]
-        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2, dilation=2)  # → [B, 256, 64, 64]
+        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2)  # → [B, 256, 64, 64]
 
-        # ---- Decoder (Feature Pyramid) ----
-        self.dec1 = backbone_moving.BasicConv2d(64 + 128 + 256, 128, kernel_size=3, padding=1)
-        self.dec2 = backbone_moving.BasicConv2d(128, 32, kernel_size=3, padding=1)
+        # ---- Deformable Attention at bottleneck ----
+        self.bottleneck_attn = backbone_moving.DeformAttnBottleneck(
+            in_channels=256,
+            d_model=128,
+            d_ffn=512,
+            n_heads=4,
+            n_points=4,
+            num_layers=2,
+        )
+
+        # ---- Decoder (Skip Connection) ----
+        self.dec3 = backbone_moving.BasicConv2d(256 + 128, 128, kernel_size=3, padding=1)  # attn + enc2 skip
+        self.dec2 = backbone_moving.BasicConv2d(128 + 64, 64, kernel_size=3, padding=1)    # dec3 + enc1 skip
+        self.dec1 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1, groups=64, bias=False),
+            nn.Conv2d(64, 32, kernel_size=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+        )
 
     def _make_layer(self, block, in_planes, out_planes, num_blocks, stride=2, dilation=1):
         layer = []
@@ -28,112 +46,36 @@ class BEVNet(nn.Module):
         layer.append(block(out_planes, dilation=dilation, use_att=True))
         return nn.Sequential(*layer)
 
-    def forward(self, bev_feat, movable_hint_bev):
+    def forward(self, bev_feat, movable_probability_mask_bev):
         """
-        bev_feat:                       [B, 192, 512, 512]  누적 BEV feature (T*pointnet_ch)
-        movable_hint_bev:   [B, 1, 512, 512] 객체 존재 확률
+        bev_feat:                       [B, T*64, 512, 512]  누적 BEV feature
+        movable_probability_mask_bev:   [B, 1, 512, 512]     객체 존재 확률
         """
 
-        # Encoder L1
+        # ---- Encoder ----
         e1 = self.enc1(bev_feat)  # [B, 64, 256, 256]
-        m1 = F.max_pool2d(movable_hint_bev, kernel_size=2, stride=2)
-        e1 = e1 * (1 + m1)  # 객체가 있는 곳의 모션 피처를 증폭 (Residual style)
+        m1 = F.max_pool2d(movable_probability_mask_bev, kernel_size=2, stride=2)
+        e1 = e1 * (1 + m1)
 
-        # Encoder L2
         e2 = self.enc2(e1)  # [B, 128, 128, 128]
         m2 = F.max_pool2d(m1, kernel_size=2, stride=2)
         e2 = e2 * (1 + m2)
 
-        # Encoder L3 (dilation=2 for larger receptive field)
         e3 = self.enc3(e2)  # [B, 256, 64, 64]
 
-        # ---- Decoder: Feature Pyramid ----
-        target_size = e1.shape[2:]  # (256, 256)
-        e2_up = F.interpolate(e2, size=target_size, mode="bilinear", align_corners=True)
-        e3_up = F.interpolate(e3, size=target_size, mode="bilinear", align_corners=True)
+        # ---- Deformable Attention ----
+        e3 = self.bottleneck_attn(e3)  # [B, 256, 64, 64]
 
-        dec = torch.cat([e1, e2_up, e3_up], dim=1)  # [B, 448, 256, 256]
-        dec = self.dec1(dec)  # [B, 128, 256, 256]
-        dec = self.dec2(dec)  # [B, 32, 256, 256]
+        # ---- Decoder: Skip Connection ----
+        d3 = F.interpolate(e3, size=e2.shape[2:], mode="bilinear", align_corners=True)
+        d3 = self.dec3(torch.cat([d3, e2], dim=1))  # [B, 128, 128, 128]
 
-        return dec
+        d2 = F.interpolate(d3, size=e1.shape[2:], mode="bilinear", align_corners=True)
+        d2 = self.dec2(torch.cat([d2, e1], dim=1))  # [B, 64, 256, 256]
 
+        d1 = self.dec1(d2)  # [B, 32, 512, 512]
 
-class RVNet(nn.Module):
-    def __init__(self, in_channels):
-        super(RVNet, self).__init__()
-        block = backbone_moving.BasicBlock
-
-        # ---- Encoder ----
-        self.enc1 = self._make_layer(block, in_channels, 64, num_blocks=3, stride=2)  # → [B, 64, 32, 1024]
-        self.enc2 = self._make_layer(block, 64, 128, num_blocks=3, stride=2)  # → [B, 128, 16, 512]
-        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2, dilation=2)  # → [B, 256, 8, 256]
-
-        # ---- Decoder (Feature Pyramid) ----
-        self.dec1 = backbone_moving.BasicConv2d(64 + 128 + 256, 128, kernel_size=3, padding=1)
-        self.dec2 = backbone_moving.BasicConv2d(128, 32, kernel_size=3, padding=1)
-
-    def _make_layer(self, block, in_planes, out_planes, num_blocks, stride=2, dilation=1):
-        layer = []
-        layer.append(backbone_moving.DownSample2D(in_planes, out_planes, stride=stride))
-        for i in range(num_blocks):
-            layer.append(block(out_planes, dilation=dilation, use_att=False))
-        layer.append(block(out_planes, dilation=dilation, use_att=True))
-        return nn.Sequential(*layer)
-
-    def forward(self, rv_feat, movable_hint_rv):
-        """
-        rv_feat:                       [B, 192, 64, 2048]  누적 RV feature (T*pointnet_ch)
-        movable_hint_rv:   [B, 1, 64, 2048] 객체 존재 확률
-        """
-
-        # Encoder L1
-        e1 = self.enc1(rv_feat)  # [B, 64, 32, 1024]
-        m1 = F.max_pool2d(movable_hint_rv, kernel_size=2, stride=2)
-        e1 = e1 * (1 + m1)  # 객체가 있는 곳의 모션 피처를 증폭 (Residual style)
-
-        # Encoder L2
-        e2 = self.enc2(e1)  # [B, 128, 16, 512]
-        m2 = F.max_pool2d(m1, kernel_size=2, stride=2)
-        e2 = e2 * (1 + m2)
-
-        # Encoder L3 (dilation=2 for larger receptive field)
-        e3 = self.enc3(e2)  # [B, 256, 8, 256]
-
-        # ---- Decoder: Feature Pyramid ----
-        target_size = e1.shape[2:]  # (32, 1024)
-        e2_up = F.interpolate(e2, size=target_size, mode="bilinear", align_corners=True)
-        e3_up = F.interpolate(e3, size=target_size, mode="bilinear", align_corners=True)
-
-        dec = torch.cat([e1, e2_up, e3_up], dim=1)  # [B, 448, 32, 1024]
-        dec = self.dec1(dec)  # [B, 128, 32, 1024]
-        dec = self.dec2(dec)  # [B, 32, 32, 1024]
-
-        return dec
-
-
-class MovingNet(nn.Module):
-    def __init__(self, in_channels):
-        super(MovingNet, self).__init__()
-        self.bev_net = BEVNet(in_channels)
-        # self.rv_net = RVNet(in_channels)
-
-    # def forward(self, point_feat, des_coord, sph_coord, movable_hint_bev, movable_hint_rv):
-    def forward(self, point_feat, des_coord, movable_hint_bev):
-        bev_input = pi_unpi.project_with_time_stack(point_feat, des_coord, 512, 512)  # [B, 192, H=512, W=512]
-        # rv_input = pi_unpi.project_with_time_stack(point_feat, sph_coord, 64, 2048)  # [B, 192, H=64, W=2048]
-
-        bev_feat = self.bev_net(bev_input, movable_hint_bev)  # [B, 32, 256, 256]
-        # rv_feat = self.rv_net(rv_input, movable_hint_rv)  # [B, 32, 32, 1024]
-
-        bev_coord_t0 = des_coord[:, -1, :, :2, :]  # [B, N, 2, 1]
-        # rv_coords_t0 = sph_coord[:, -1, :, :2, :].flip(-2)  # [B, N, 2, 1]
-
-        moving_feat_3d_bev = pi_unpi.unprojectors["half"](bev_feat, bev_coord_t0)  # [B, 32, N, 1]
-        # moving_feat_3d_rv = pi_unpi.unprojectors["half"](rv_feat, rv_coords_t0)  # [B, 32, N, 1]
-
-        return moving_feat_3d_bev
-        # return moving_feat_3d_bev, moving_feat_3d_rv
+        return d1
 
 
 class MovableNet(nn.Module):
@@ -184,20 +126,6 @@ class MovableNet(nn.Module):
         up2 = self.upBlock2(up3, down1b)  # [B, 64, 32, 512]
         up1 = self.upBlock3(up2, down0b)  # [B, 32, 64, 2048]
 
-        # 4. Movable logits (raw — softmax는 loss/BEVNet에서 각각 적용)
-        return self.logits(up1)  # [B, out_ch, 64, 2048]
-
-
-if __name__ == "__main__":
-    bev_net = BEVNet()
-    rv_net = RVNet()
-
-    bev_net.eval()
-    rv_net.eval()
-    with torch.no_grad():
-        # print #trainable_parameters
-        num_params_bev = sum(p.numel() for p in bev_net.parameters() if p.requires_grad)
-        num_params_rv = sum(p.numel() for p in rv_net.parameters() if p.requires_grad)
-        print(
-            f"Trainable parameters: BEV: {num_params_bev:,}, RV: {num_params_rv:,} | Ratio: {round(num_params_bev / num_params_rv, 2)} : 1"
-        )
+        # 4. Movable logits (raw — softmax는 loss에서 적용)
+        logits = self.logits(up1)  # [B, out_ch, 64, 2048]
+        return logits
