@@ -15,6 +15,37 @@ pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https
 pip install -r requirements.txt
 ```
 
+### MinkowskiEngine (Sparse Convolution)
+
+```bash
+git clone https://github.com/NVIDIA/MinkowskiEngine.git
+cd MinkowskiEngine
+
+# thrust 헤더 추가 (CUDA 12 호환)
+sed -i '1i #include <thrust/execution_policy.h>' src/convolution_kernel.cuh
+sed -i '1i #include <thrust/unique.h>\n#include <thrust/remove.h>' src/coordinate_map_gpu.cu
+sed -i '1i #include <thrust/execution_policy.h>\n#include <thrust/reduce.h>\n#include <thrust/sort.h>' src/spmm.cu
+sed -i '1i #include <thrust/execution_policy.h>' src/3rdparty/concurrent_unordered_map.cuh
+
+# setup.py의 ext_modules에 NVTX_DISABLE 추가 (nvtx3 헤더 충돌 방지)
+# define_macros=[('NVTX_DISABLE', None)],
+# extra_compile_args: cxx/nvcc 모두 '-DNVTX_DISABLE' 추가
+
+# 시스템 GCC 11로 빌드 (conda GCC 14는 pybind11 호환 문제)
+CUDA_HOME=/usr/local/cuda-12.8 \
+CC=/usr/bin/gcc CXX=/usr/bin/g++ \
+CPLUS_INCLUDE_PATH=/usr/include/x86_64-linux-gnu \
+python setup.py install
+
+cd ..
+```
+
+빌드 확인:
+
+```bash
+python -c "import MinkowskiEngine as ME; print(f'MinkowskiEngine {ME.__version__} OK')"
+```
+
 ### Deformable Attention CUDA Extension
 
 ```bash
