@@ -120,11 +120,12 @@ class FarMOS(nn.Module):
             "moving_logit_3d": moving_logit_3d,
             "movable_logit_2d": movable_logit_rv,
             "visualization": [
-                (movable_logit_rv, "movable_logit_rv"),
-                (movable_logit_as_bev, "movable_logit_bev"),
-                (movable_mask_bev, "movable_mask_bev"),
-                (bev_input, "bev_input"),
-                (moving_feat_bev, "moving_feat_bev"),
+                (movable_logit_rv.argmax(dim=1, keepdim=True).float(), "pred_movable_rv"),
+                (movable_logit_as_bev.argmax(dim=1, keepdim=True).float(), "pred_movable_bev"),
+                (torch.softmax(movable_logit_rv, dim=1)[:, 2:3, :, :], "heatmap_movable_rv"),
+                (movable_mask_bev, "heatmap_movable_bev"),
+                (bev_input, "feat_bev_input"),
+                (moving_feat_bev, "feat_moving_bev"),
             ],
         }
 

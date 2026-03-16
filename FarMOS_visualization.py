@@ -51,14 +51,15 @@ if __name__ == "__main__":
     try:
         ckpt = load_checkpoint(model, args.checkpoint)
         print(f"Successfully Loaded checkpoint: {args.checkpoint} (epoch {ckpt['epoch']})")
-    except:
+    except Exception as e:
+        print(f"Failed to load checkpoint: {e}")
         print("모델 구조가 달라 그냥 현재 구조로 진행합니다")
 
     with torch.no_grad():
         # Labels
         save_feature_as_img(
             [moving_label_bev, moving_label_rv, movable_label_rv],
-            ["moving_label_bev", "moving_label_rv", "movable_label_rv"],
+            ["GT_moving_bev", "GT_moving_rv", "GT_movable_rv"],
             "max",
         )
         print("Label saved.")

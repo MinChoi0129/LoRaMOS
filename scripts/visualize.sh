@@ -7,7 +7,7 @@
 # Dataset
 SEQUENCE_DIR="/home/ssd_data/ROOT_KITTI/KITTI/dataset/sequences/"
 FRAME_ID=4017
-CHECKPOINT="/home/work/FarMOS/logs/Exp18/checkpoints/latest.pth"
+CHECKPOINT="/home/work/FarMOS/logs/Exp26/checkpoints/latest.pth"
 
 # ============================================================
 

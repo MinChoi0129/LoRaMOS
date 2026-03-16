@@ -13,7 +13,7 @@ TRAIN_CONFIG="config/train.yaml"
 
 # ============================================================
 # [keep mode] Resume from this experiment
-RESUME_EXP="Exp21"
+RESUME_EXP="Exp25"
 # ============================================================
 
 if [ "${MODE}" = "new" ]; then

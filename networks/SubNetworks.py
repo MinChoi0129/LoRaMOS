@@ -29,7 +29,7 @@ class MovingNet(nn.Module):
 
         # ---- Decoder (Skip Connection) ----
         self.dec3 = backbone_moving.BasicConv2d(256 + 128, 128, kernel_size=3, padding=1)  # attn + enc2 skip
-        self.dec2 = backbone_moving.BasicConv2d(128 + 64, 64, kernel_size=3, padding=1)    # dec3 + enc1 skip
+        self.dec2 = backbone_moving.BasicConv2d(128 + 64, 64, kernel_size=3, padding=1)  # dec3 + enc1 skip
         self.dec1 = nn.Sequential(
             nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
             nn.Conv2d(64, 64, kernel_size=3, padding=1, groups=64, bias=False),

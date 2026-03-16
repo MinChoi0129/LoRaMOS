@@ -25,14 +25,18 @@ def save_feature_as_img(variables, variable_names, channel_pool="max"):
         except:
             single_batch = variable[0].detach().cpu().numpy()
 
-        try:  # feature
+        if variable_name.startswith("GT_") or variable_name.startswith("pred_"):
+            img = single_batch.squeeze()
+            print("Saving : ", variable_name, "as class map")
+            plt.imsave(f"{save_dir}/{variable_name}.png", img, cmap="viridis", vmin=0, vmax=2)
+        elif variable_name.startswith("heatmap_"):
+            img = single_batch.squeeze()
+            print("Saving : ", variable_name, "as heatmap")
+            plt.imsave(f"{save_dir}/{variable_name}.png", img, cmap="viridis", vmin=0, vmax=1)
+        else:
             if channel_pool == "mean":
-                channel_mean = np.mean(single_batch, axis=0)
-                plt.imsave(f"{save_dir}/{variable_name}.png", channel_mean, cmap="viridis")
-            elif channel_pool == "max":
-                channel_max = np.max(single_batch, axis=0)
-                plt.imsave(f"{save_dir}/{variable_name}.png", channel_max, cmap="viridis")
+                pooled = np.mean(single_batch, axis=0)
             else:
-                raise ValueError(f"Invalid channel_pool value: {channel_pool}")
-        except:  # label/pred (class 0, 1, 2)
-            plt.imsave(f"{save_dir}/{variable_name}.png", single_batch, cmap="viridis", vmin=0, vmax=2)
+                pooled = np.max(single_batch, axis=0)
+            print("Saving : ", variable_name, "as feature")
+            plt.imsave(f"{save_dir}/{variable_name}.png", pooled, cmap="viridis")
