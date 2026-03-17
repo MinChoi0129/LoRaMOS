@@ -6,37 +6,25 @@ from networks.backbone_movable import MetaKernel, ResContextBlock, ResBlock, UpB
 
 
 class MovingNet(nn.Module):
-    """Cartesian BEV Encoder-Decoder."""
+    """Cartesian BEV Encoder-Decoder (Feature Pyramid + DeformAttn)."""
 
     def __init__(self, in_channels):
         super(MovingNet, self).__init__()
         block = backbone_moving.BasicBlock
 
         # ---- Encoder ----
-        self.enc1 = self._make_layer(block, in_channels, 64, num_blocks=3, stride=2)  # → [B, 64, 256, 256]
-        self.enc2 = self._make_layer(block, 64, 128, num_blocks=3, stride=2)  # → [B, 128, 128, 128]
-        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2)  # → [B, 256, 64, 64]
+        self.enc1 = self._make_layer(block, in_channels, 64, num_blocks=3, stride=2)   # → [B, 64, 256, 256]
+        self.enc2 = self._make_layer(block, 64, 128, num_blocks=3, stride=2)            # → [B, 128, 128, 128]
+        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2)           # → [B, 256, 64, 64]
 
         # ---- Deformable Attention at bottleneck ----
         self.bottleneck_attn = backbone_moving.DeformAttnBottleneck(
-            in_channels=256,
-            d_model=128,
-            d_ffn=512,
-            n_heads=4,
-            n_points=4,
-            num_layers=2,
+            in_channels=256, d_model=128, d_ffn=512, n_heads=4, n_points=4, num_layers=2,
         )
 
-        # ---- Decoder (Skip Connection) ----
-        self.dec3 = backbone_moving.BasicConv2d(256 + 128, 128, kernel_size=3, padding=1)  # attn + enc2 skip
-        self.dec2 = backbone_moving.BasicConv2d(128 + 64, 64, kernel_size=3, padding=1)  # dec3 + enc1 skip
-        self.dec1 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1, groups=64, bias=False),
-            nn.Conv2d(64, 32, kernel_size=1, bias=False),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-        )
+        # ---- Decoder (Feature Pyramid → 256×256 출력) ----
+        self.dec1 = backbone_moving.BasicConv2d(64 + 128 + 256, 128, kernel_size=3, padding=1)
+        self.dec2 = backbone_moving.BasicConv2d(128, 32, kernel_size=3, padding=1)
 
     def _make_layer(self, block, in_planes, out_planes, num_blocks, stride=2, dilation=1):
         layer = []
@@ -53,29 +41,29 @@ class MovingNet(nn.Module):
         """
 
         # ---- Encoder ----
-        e1 = self.enc1(bev_feat)  # [B, 64, 256, 256]
+        e1 = self.enc1(bev_feat)    # [B, 64, 256, 256]
         m1 = F.max_pool2d(movable_probability_mask_bev, kernel_size=2, stride=2)
         e1 = e1 * (1 + m1)
 
-        e2 = self.enc2(e1)  # [B, 128, 128, 128]
+        e2 = self.enc2(e1)          # [B, 128, 128, 128]
         m2 = F.max_pool2d(m1, kernel_size=2, stride=2)
         e2 = e2 * (1 + m2)
 
-        e3 = self.enc3(e2)  # [B, 256, 64, 64]
+        e3 = self.enc3(e2)          # [B, 256, 64, 64]
 
         # ---- Deformable Attention ----
         e3 = self.bottleneck_attn(e3)  # [B, 256, 64, 64]
 
-        # ---- Decoder: Skip Connection ----
-        d3 = F.interpolate(e3, size=e2.shape[2:], mode="bilinear", align_corners=True)
-        d3 = self.dec3(torch.cat([d3, e2], dim=1))  # [B, 128, 128, 128]
+        # ---- Decoder: Feature Pyramid ----
+        target_size = e1.shape[2:]
+        e2_up = F.interpolate(e2, size=target_size, mode="bilinear", align_corners=True)
+        e3_up = F.interpolate(e3, size=target_size, mode="bilinear", align_corners=True)
 
-        d2 = F.interpolate(d3, size=e1.shape[2:], mode="bilinear", align_corners=True)
-        d2 = self.dec2(torch.cat([d2, e1], dim=1))  # [B, 64, 256, 256]
+        dec = torch.cat([e1, e2_up, e3_up], dim=1)  # [B, 448, 256, 256]
+        dec = self.dec1(dec)      # [B, 128, 256, 256]
+        dec = self.dec2(dec)      # [B, 32, 256, 256]
 
-        d1 = self.dec1(d2)  # [B, 32, 512, 512]
-
-        return d1
+        return dec
 
 
 class MovableNet(nn.Module):

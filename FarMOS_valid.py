@@ -6,8 +6,8 @@ import torch
 from tqdm import tqdm
 
 from networks.MainNetwork import FarMOS
-from utils.checkpoint import load_checkpoint
-from utils.builder import build_val_loader, build_test_loader
+from core.checkpoint import load_checkpoint
+from core.builder import build_val_loader, build_test_loader
 
 
 def get_args():

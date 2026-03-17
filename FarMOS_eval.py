@@ -5,7 +5,7 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 
-from utils.metrics import iouEval
+from core.metrics import iouEval
 
 
 def get_args():

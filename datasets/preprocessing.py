@@ -25,7 +25,7 @@ from datasets.pointcloud import (
     generate_rv_features,
     generate_rv_label,
 )
-from utils.pretty_printer_and_saver import shprint
+from core.pretty_printer_and_saver import shprint
 
 
 # ============================================================

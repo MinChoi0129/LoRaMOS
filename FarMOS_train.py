@@ -9,10 +9,10 @@ from tqdm import tqdm
 
 from networks.MainNetwork import FarMOS
 from datasets.config import RANGE_BINS
-from utils.metrics import validate
-from utils.logger import Logger, init_wandb, log_epoch
-from utils.checkpoint import load_checkpoint, save_all_best_checkpoints
-from utils.builder import (
+from core.metrics import validate
+from core.logger import Logger, init_wandb, log_epoch
+from core.checkpoint import load_checkpoint, save_all_best_checkpoints
+from core.builder import (
     build_optimizer,
     build_scheduler,
     build_train_loader,
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     train_loader = build_train_loader(cfg)
     val_loader = build_val_loader(cfg["sequence_dir"], cfg["num_workers"])
 
-    model = torch.compile(FarMOS().cuda())
+    model = FarMOS().cuda()
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.log(f"Total Trainable parameters: {num_params:,}")
     optimizer = build_optimizer(cfg, model)

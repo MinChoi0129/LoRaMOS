@@ -4,7 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import yaml
 from networks import backbone_moving, loss, SubNetworks
-from utils.projector_unprojector import project, unproject
+from networks.backbone_moving_sparse import SparsePointEncoder
+from core.projector_unprojector import project, unproject
 from datasets.config import NUM_TEMPORAL_FRAMES
 
 
@@ -21,12 +22,12 @@ class FarMOS(nn.Module):
             print(f"Trainable parameters: [{model_name}] > {num_params:,}")
 
         self.pointnet_ch = 64
-        self.pointnet = backbone_moving.PointNetStacker(7, self.pointnet_ch, pre_bn=True, stack_num=2)
+        self.sparse_encoder = SparsePointEncoder(in_ch=4, out_ch=self.pointnet_ch)
         self.moving_net = SubNetworks.MovingNet(in_channels=NUM_TEMPORAL_FRAMES * self.pointnet_ch)
         self.movable_net = SubNetworks.MovableNet()
         self.point_fuse = backbone_moving.CatFusion([self.pointnet_ch, 32, 3], 3)
 
-        __print_num_params(self.pointnet, "pointnet")
+        __print_num_params(self.sparse_encoder, "sparse_encoder")
         __print_num_params(self.moving_net, "moving_net")
         __print_num_params(self.movable_net, "movable_net")
         __print_num_params(self.point_fuse, "point_fuse")
@@ -87,18 +88,17 @@ class FarMOS(nn.Module):
         # **************** [ Step 0: shape, time, 좌표 추출 ] ****************
         B, T, C, N, _ = xyzi.shape
 
-        # **************** [ Step 1: Point Feature 추출 ] ****************
+        # **************** [ Step 1: Point Feature 추출 (ME 경량 3D encoder) ] ****************
         # 패딩 포인트 마스킹 (BatchNorm 오염 방지)
         valid_mask = (xyzi[:, :, 4:5, :, :] < 100.0).float()  # [B, T, 1, N, 1]
         valid_mask_flat = valid_mask.view(B * T, 1, N, 1)  # [B*T, 1, N, 1]
         xyzi = xyzi * valid_mask  # [B, T, 7, N, 1]
         xyzi_flatten = xyzi.view(B * T, C, N, 1)  # [B*T, 7, N, 1]
 
-        pcd_feat = self.pointnet(xyzi_flatten)  # [B*T, 64, N, 1]
-        pcd_feat = pcd_feat * valid_mask_flat  # [B*T, 64, N, 1]
+        pcd_feat = self.sparse_encoder(xyzi_flatten, valid_mask_flat)  # [B*T, 64, N, 1]
         pcd_feat_t0 = pcd_feat.view(B, T, 64, N, 1)[:, -1]  # [B, 64, N, 1]
 
-        # **************** [ Step 2: Semantic 힌트 생성 ] ***************
+        # **************** [ Step 2: Semantic 힌트 생성 (Range View) ] ***************
         movable_logit_rv = self.movable_net(rv_input)  # [B, K=3, 64, 2048]
         movable_logit_as_3d = unproject(movable_logit_rv, rv_coord[:, -1], scale=1.0)  # [B, K=3, N, 1]
 
@@ -110,8 +110,8 @@ class FarMOS(nn.Module):
         # **************** [ Step 3: BEV Moving 예측 생성 ] ****************
         bev_input = project(pcd_feat, bev_coord, view="bev")  # [B, T*64, H, W]
 
-        moving_feat_bev = self.moving_net(bev_input, movable_mask_bev)  # [B, 32, H, W]
-        moving_feat_3d = unproject(moving_feat_bev, bev_coord[:, -1], scale=1.0)  # [B, 32, N, 1]
+        moving_feat_bev = self.moving_net(bev_input, movable_mask_bev)  # [B, 32, 256, 256]
+        moving_feat_3d = unproject(moving_feat_bev, bev_coord[:, -1], scale=0.5)  # [B, 32, N, 1]
 
         # **************** [ Step 4: 3차원 피처 모두 융합 ] ****************
         moving_logit_3d = self.point_fuse(pcd_feat_t0, moving_feat_3d, movable_logit_as_3d.detach())  # [B, K=3, N, 1]
@@ -120,9 +120,9 @@ class FarMOS(nn.Module):
             "moving_logit_3d": moving_logit_3d,
             "movable_logit_2d": movable_logit_rv,
             "visualization": [
+                (project(moving_logit_3d, bev_coord[:, -1], view="bev").argmax(dim=1, keepdim=True).float(), "pred_moving_bev"),
                 (movable_logit_rv.argmax(dim=1, keepdim=True).float(), "pred_movable_rv"),
                 (movable_logit_as_bev.argmax(dim=1, keepdim=True).float(), "pred_movable_bev"),
-                (torch.softmax(movable_logit_rv, dim=1)[:, 2:3, :, :], "heatmap_movable_rv"),
                 (movable_mask_bev, "heatmap_movable_bev"),
                 (bev_input, "feat_bev_input"),
                 (moving_feat_bev, "feat_moving_bev"),

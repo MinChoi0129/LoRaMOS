@@ -2,9 +2,9 @@ import argparse
 import torch
 from networks.MainNetwork import FarMOS
 from datasets.dataloader import DataloadVal
-from utils.checkpoint import load_checkpoint
-from utils.projector_unprojector import project, unproject
-from utils.pretty_printer_and_saver import save_feature_as_img
+from core.checkpoint import load_checkpoint
+from core.projector_unprojector import project, unproject
+from core.pretty_printer_and_saver import save_feature_as_img
 
 
 def get_args():
