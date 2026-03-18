@@ -6,7 +6,7 @@ from datasets.config import BEV_GRID_SIZE, RV_GRID_SIZE
 # BEV: col=x_quan, row=y_quan | RV: col=phi_quan, row=theta_quan
 _VIEW_SIZES = {
     "bev": (BEV_GRID_SIZE[0], BEV_GRID_SIZE[1]),  # (H=512, W=512)
-    "rv": (RV_GRID_SIZE[0], RV_GRID_SIZE[1]),      # (H=64, W=2048)
+    "rv": (RV_GRID_SIZE[0], RV_GRID_SIZE[1]),  # (H=64, W=2048)
 }
 
 

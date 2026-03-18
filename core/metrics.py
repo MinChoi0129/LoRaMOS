@@ -45,18 +45,19 @@ def validate(model, val_loader, range_bins):
 
     with torch.no_grad():
         for batch in tqdm(val_loader, desc="  Val", dynamic_ncols=True):
-            xyzi, bev_coord, rv_coord, rv_input, label_3d, label_2d, num_valid, _, _ = batch
-            xyzi, bev_coord, rv_coord, rv_input, label_3d, label_2d, num_valid = (
-                xyzi.cuda(),
+            pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, num_valid, _, _ = batch
+            pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, num_valid = (
+                pcd_input.cuda(),
+                rv_input.cuda(),
                 bev_coord.cuda(),
                 rv_coord.cuda(),
-                rv_input.cuda(),
-                label_3d.cuda(),
-                label_2d.cuda(),
+                label_moving_3d.cuda(),
+                label_movable_rv.cuda(),
+                label_moving_bev.cuda(),
                 num_valid.cuda(),
             )
 
-            out = model(xyzi, bev_coord, rv_coord, rv_input, label_3d, label_2d, num_valid)
+            out = model(pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev)
             total_loss += out["loss"].item()
             total_mov += out["loss_moving"].item()
             total_mbl += out["loss_movable"].item()
@@ -64,8 +65,8 @@ def validate(model, val_loader, range_bins):
 
             # Moving evaluation (3D point-wise)
             moving_pred = out["moving_logit_3d"].squeeze(-1).argmax(dim=1).cpu().numpy()
-            moving_gt = label_3d.cpu().numpy()
-            depth = xyzi[:, -1, 4, :, 0].cpu().numpy()  # [B, N]
+            moving_gt = label_moving_3d.cpu().numpy()
+            depth = pcd_input[:, -1, 4, :, 0].cpu().numpy()  # [B, N]
 
             for b in range(moving_pred.shape[0]):
                 nv = num_valid[b].item()
@@ -81,7 +82,7 @@ def validate(model, val_loader, range_bins):
 
             # Movable evaluation (2D RV pixel-wise)
             movable_pred = out["movable_logit_2d"].argmax(dim=1).cpu().numpy()
-            movable_gt = label_2d.cpu().numpy()
+            movable_gt = label_movable_rv.cpu().numpy()
             for b in range(movable_pred.shape[0]):
                 movable_evaluator.addBatch(movable_pred[b].flatten(), movable_gt[b].flatten().astype(np.int32))
 

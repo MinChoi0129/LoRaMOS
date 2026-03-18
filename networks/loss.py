@@ -302,6 +302,17 @@ def hinge_jaccard_loss(probas, labels, ignore=None, classes="present", hinge=0.1
     return mean(losses)
 
 
+class LovaszSoftmax(torch.nn.Module):
+    """nn.Module wrapper for lovasz_softmax with fixed ignore label."""
+
+    def __init__(self, ignore=0):
+        super().__init__()
+        self.ignore = ignore
+
+    def forward(self, logits, labels):
+        return lovasz_softmax(logits, labels, ignore=self.ignore)
+
+
 # --------------------------- HELPER FUNCTIONS ---------------------------
 def isnan(x):
     return x != x

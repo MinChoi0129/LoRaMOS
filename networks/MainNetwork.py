@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import yaml
 from networks import backbone_moving, loss, SubNetworks
-from networks.backbone_moving_sparse import SparsePointEncoder
 from core.projector_unprojector import project, unproject
 from datasets.config import NUM_TEMPORAL_FRAMES
 
@@ -22,12 +21,19 @@ class FarMOS(nn.Module):
             print(f"Trainable parameters: [{model_name}] > {num_params:,}")
 
         self.pointnet_ch = 64
-        self.sparse_encoder = SparsePointEncoder(in_ch=4, out_ch=self.pointnet_ch)
-        self.moving_net = SubNetworks.MovingNet(in_channels=NUM_TEMPORAL_FRAMES * self.pointnet_ch)
+        self.pointnet = backbone_moving.PointNetStacker(7, self.pointnet_ch, pre_bn=True, stack_num=2)
+        bev_in_ch = NUM_TEMPORAL_FRAMES * self.pointnet_ch
+        self.movable_fuse_conv = nn.Sequential(
+            nn.Conv2d(bev_in_ch + 3, bev_in_ch, kernel_size=1, bias=False),
+            nn.BatchNorm2d(bev_in_ch),
+            nn.ReLU(inplace=True),
+        )
+        self.moving_net = SubNetworks.MovingNet(in_channels=bev_in_ch)
         self.movable_net = SubNetworks.MovableNet()
         self.point_fuse = backbone_moving.CatFusion([self.pointnet_ch, 32, 3], 3)
+        self.moving_head_2d = nn.Conv2d(32, 3, kernel_size=1, bias=True)
 
-        __print_num_params(self.sparse_encoder, "sparse_encoder")
+        __print_num_params(self.pointnet, "pointnet")
         __print_num_params(self.moving_net, "moving_net")
         __print_num_params(self.movable_net, "movable_net")
         __print_num_params(self.point_fuse, "point_fuse")
@@ -50,67 +56,52 @@ class FarMOS(nn.Module):
         moving_loss_w = get_weights("learning_map")
         movable_loss_w = get_weights("movable_learning_map")
 
-        self.moving_nll_loss = nn.NLLLoss(weight=moving_loss_w.double(), ignore_index=0, reduction="none")
+        self.moving_nll_loss_3d = nn.NLLLoss(weight=moving_loss_w.double(), ignore_index=0)
+        self.moving_nll_loss_2d = nn.NLLLoss(weight=moving_loss_w.double(), ignore_index=0)
         self.movable_nll_loss = nn.NLLLoss(weight=movable_loss_w.double(), ignore_index=0)
-        self.lovasz_loss = loss.lovasz_softmax
+        self.lovasz_loss = loss.LovaszSoftmax(ignore=0)
 
-    def get_loss(self, pred, label, mode, num_valid=None):
+    def get_loss(self, pred, label, mode):
         if mode == "moving":
-            B, C = pred.shape[0], pred.shape[1]
-            N = pred.shape[2]
+            pred = pred.view(pred.shape[0], pred.shape[1], -1).unsqueeze(-1)
+            label = label.view(pred.shape[0], -1).unsqueeze(-1)
 
-            pred = pred.view(B, C, -1).unsqueeze(-1)
-            label = label.view(B, -1).unsqueeze(-1)
+        l_nll_fn = {"moving": self.moving_nll_loss_3d, "moving_2d": self.moving_nll_loss_2d, "movable": self.movable_nll_loss}[
+            mode
+        ]
+        l_nll = l_nll_fn(F.log_softmax(pred, dim=1).double(), label).float()
+        l_lovasz = self.lovasz_loss(pred, label.long())
 
-            per_point_nll = self.moving_nll_loss(F.log_softmax(pred, dim=1).double(), label)
+        return l_nll + l_lovasz
 
-            # num_valid 마스킹: 패딩 영역 제외
-            target_valid = (label != 0).float()
-            if num_valid is not None:
-                seq_range = torch.arange(N, device=pred.device).view(1, N, 1)
-                valid_mask = seq_range < num_valid.view(B, 1, 1)
-                target_valid = target_valid * valid_mask.float()
-
-            l_nll = (per_point_nll * target_valid.double()).sum() / (target_valid.sum() + 1e-6)
-            l_nll = l_nll.float()
-
-            l_lovasz = self.lovasz_loss(pred, label.long(), ignore=0)
-
-            return l_nll + l_lovasz
-
-        elif mode == "movable":
-            l_nll = self.movable_nll_loss(F.log_softmax(pred, dim=1).double(), label).float()
-            l_lovasz = self.lovasz_loss(pred, label.long(), ignore=0)
-
-            return l_nll + l_lovasz
-
-    def infer(self, xyzi, bev_coord, rv_coord, rv_input):
+    def infer(self, pcd_input, rv_input, bev_coord, rv_coord):
         # **************** [ Step 0: shape, time, 좌표 추출 ] ****************
-        B, T, C, N, _ = xyzi.shape
+        B, T, C, N, _ = pcd_input.shape
 
-        # **************** [ Step 1: Point Feature 추출 (ME 경량 3D encoder) ] ****************
-        # 패딩 포인트 마스킹 (BatchNorm 오염 방지)
-        valid_mask = (xyzi[:, :, 4:5, :, :] < 100.0).float()  # [B, T, 1, N, 1]
+        # **************** [ Step 1: Point Feature 추출 ] ****************
+        valid_mask = (pcd_input[:, :, 4:5, :, :] < 100.0).float()  # [B, T, 1, N, 1]
         valid_mask_flat = valid_mask.view(B * T, 1, N, 1)  # [B*T, 1, N, 1]
-        xyzi = xyzi * valid_mask  # [B, T, 7, N, 1]
-        xyzi_flatten = xyzi.view(B * T, C, N, 1)  # [B*T, 7, N, 1]
+        pcd_input = pcd_input * valid_mask  # [B, T, 7, N, 1]
+        pcd_flat = pcd_input.view(B * T, C, N, 1)  # [B*T, 7, N, 1]
 
-        pcd_feat = self.sparse_encoder(xyzi_flatten, valid_mask_flat)  # [B*T, 64, N, 1]
+        pcd_feat = self.pointnet(pcd_flat)  # [B*T, 64, N, 1]
+        pcd_feat = pcd_feat * valid_mask_flat  # [B*T, 64, N, 1]
         pcd_feat_t0 = pcd_feat.view(B, T, 64, N, 1)[:, -1]  # [B, 64, N, 1]
 
         # **************** [ Step 2: Semantic 힌트 생성 (Range View) ] ***************
         movable_logit_rv = self.movable_net(rv_input)  # [B, K=3, 64, 2048]
         movable_logit_as_3d = unproject(movable_logit_rv, rv_coord[:, -1], scale=1.0)  # [B, K=3, N, 1]
 
-        # Movable logit → BEV (softmax → 객체 존재 확률 마스크)
-        movable_logit_as_bev = project(movable_logit_as_3d, bev_coord[:, -1], view="bev")  # [B, K=3, H, W]
-        movable_prob_bev = torch.softmax(movable_logit_as_bev, dim=1)
-        movable_mask_bev = movable_prob_bev[:, 2:3, :, :].detach()  # [B, 1, H, W]
+        # Movable logit → BEV (raw logit concat)
+        movable_logit_as_bev = project(movable_logit_as_3d, bev_coord[:, -1], view="bev")  # [B, 3, H, W]
 
         # **************** [ Step 3: BEV Moving 예측 생성 ] ****************
         bev_input = project(pcd_feat, bev_coord, view="bev")  # [B, T*64, H, W]
+        bev_input = self.movable_fuse_conv(torch.cat([bev_input, movable_logit_as_bev.detach()], dim=1))  # [B, T*64, H, W]
 
-        moving_feat_bev = self.moving_net(bev_input, movable_mask_bev)  # [B, 32, 256, 256]
+        moving_feat_bev = self.moving_net(bev_input)  # [B, 32, 256, 256]
+        moving_logit_2d_bev = self.moving_head_2d(moving_feat_bev)  # [B, 3, 256, 256]
+
         moving_feat_3d = unproject(moving_feat_bev, bev_coord[:, -1], scale=0.5)  # [B, 32, N, 1]
 
         # **************** [ Step 4: 3차원 피처 모두 융합 ] ****************
@@ -118,30 +109,41 @@ class FarMOS(nn.Module):
 
         return {
             "moving_logit_3d": moving_logit_3d,
+            "moving_logit_2d_bev": moving_logit_2d_bev,
             "movable_logit_2d": movable_logit_rv,
             "visualization": [
-                (project(moving_logit_3d, bev_coord[:, -1], view="bev").argmax(dim=1, keepdim=True).float(), "pred_moving_bev"),
+                (moving_logit_2d_bev.argmax(dim=1, keepdim=True).float(), "pred_moving_bev"),
                 (movable_logit_rv.argmax(dim=1, keepdim=True).float(), "pred_movable_rv"),
-                (movable_logit_as_bev.argmax(dim=1, keepdim=True).float(), "pred_movable_bev"),
-                (movable_mask_bev, "heatmap_movable_bev"),
                 (bev_input, "feat_bev_input"),
                 (moving_feat_bev, "feat_moving_bev"),
             ],
         }
 
-    def forward(self, xyzi, bev_coord, rv_coord, rv_input, current_moving_label_3d, current_movable_label_2d, num_valid_t0):
-        output = self.infer(xyzi, bev_coord, rv_coord, rv_input)
+    def forward(
+        self,
+        pcd_input,
+        rv_input,
+        bev_coord,
+        rv_coord,
+        label_moving_3d,
+        label_movable_rv,
+        label_moving_bev,
+    ):
+        output = self.infer(pcd_input, rv_input, bev_coord, rv_coord)
 
         moving_logit_3d = output["moving_logit_3d"]
+        moving_logit_2d_bev = output["moving_logit_2d_bev"]
         movable_logit_2d = output["movable_logit_2d"]
 
-        loss_moving = self.get_loss(moving_logit_3d, current_moving_label_3d, mode="moving", num_valid=num_valid_t0)
-        loss_movable = self.get_loss(movable_logit_2d, current_movable_label_2d, mode="movable")
-        loss = loss_moving + loss_movable
+        loss_moving = self.get_loss(moving_logit_3d, label_moving_3d, mode="moving")
+        loss_moving_2d = self.get_loss(moving_logit_2d_bev, label_moving_bev, mode="moving_2d")
+        loss_movable = self.get_loss(movable_logit_2d, label_movable_rv, mode="movable")
+        total_loss = loss_moving + loss_moving_2d + loss_movable
 
         return {
-            "loss": loss,
+            "loss": total_loss,
             "loss_moving": loss_moving,
+            "loss_moving_2d": loss_moving_2d,
             "loss_movable": loss_movable,
             "moving_logit_3d": moving_logit_3d,
             "movable_logit_2d": movable_logit_2d,
@@ -165,17 +167,17 @@ if __name__ == "__main__":
     model = FarMOS().to(device)
     model.train()
 
-    # Load real data once from dataloader
     print("Loading sample from dataloader...")
-    for xyzi, bev_coord, rv_coord, rv_input, label_3d, label_2d, num_valid_t0 in loader:
-        xyzi = xyzi.to(device)
-        bev_coord = bev_coord.to(device)
-        rv_coord = rv_coord.to(device)
-        rv_input = rv_input.to(device)
-        label_3d = label_3d.to(device)
-        label_2d = label_2d.to(device)
-        num_valid_t0 = num_valid_t0.to(device)
+    for batch in loader:
+        pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, num_valid_t0 = [
+            x.to(device) for x in batch
+        ]
 
-        output = model(xyzi, bev_coord, rv_coord, rv_input, label_3d, label_2d, num_valid_t0)
+        output = model(pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev)
         print("Forward Pass Successful! Loss:", output["loss"].item())
+        print(
+            f"  loss_moving={output['loss_moving'].item():.4f}, loss_moving_2d={output['loss_moving_2d'].item():.4f}, loss_movable={output['loss_movable'].item():.4f}"
+        )
+        output["loss"].backward()
+        print("Backward Pass Successful!")
         break

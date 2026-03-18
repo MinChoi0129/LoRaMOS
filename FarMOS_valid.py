@@ -41,14 +41,14 @@ def run_predict(args, model, task_cfg, loader, desc):
     with torch.no_grad():
         for batch in tqdm(loader, desc=desc, dynamic_ncols=True):
             if args.mode == "val":
-                xyzi, bev_coord, rv_coord, rv_input, _, _, num_valid, seq_ids, file_ids = batch
+                pcd_input, rv_input, bev_coord, rv_coord, _, _, _, num_valid, seq_ids, file_ids = batch
             else:
-                xyzi, bev_coord, rv_coord, rv_input, num_valid, seq_ids, file_ids = batch
+                pcd_input, rv_input, bev_coord, rv_coord, num_valid, seq_ids, file_ids = batch
 
-            xyzi, bev_coord, rv_coord = xyzi.cuda(), bev_coord.cuda(), rv_coord.cuda()
-            rv_input = rv_input.cuda()
+            pcd_input, rv_input = pcd_input.cuda(), rv_input.cuda()
+            bev_coord, rv_coord = bev_coord.cuda(), rv_coord.cuda()
 
-            output = model.infer(xyzi, bev_coord, rv_coord, rv_input)
+            output = model.infer(pcd_input, rv_input, bev_coord, rv_coord)
             pred_cls = output["moving_logit_3d"].squeeze(-1).argmax(dim=1).cpu().numpy()
 
             for b in range(pred_cls.shape[0]):

@@ -69,20 +69,39 @@ def relabel(raw_labels, label_map):
 # ============================================================
 
 
-def quantize_cartesian(points_xyzi, range_x, range_y, range_z, grid_size):
-    """3D 좌표 -> BEV 격자 인덱스로 양자화. Returns: [N, 3] — [col(x), row(y), depth(z)]"""
+def quantize_cartesian(points_xyzi, range_x, range_y, range_z, grid_size, alpha=None):
+    """3D 좌표 -> Log-Radial Warped Cartesian BEV 격자 인덱스로 양자화.
+    (x,y)를 직접 워핑: warp = α·log(1+r/α)/r, x'=x*warp, y'=y*warp.
+    근거리(warp≈1)는 거의 변하지 않고, 원거리만 압축. alpha=0이면 균일 Cartesian.
+    Returns: [N, 3] — [col(x'), row(y'), depth(z)]"""
+    from datasets.config import BEV_WARP_ALPHA
     height, width, depth = grid_size
+    alpha = alpha if alpha is not None else BEV_WARP_ALPHA
+    r_max = max(abs(range_x[0]), abs(range_x[1]))  # 50m
 
     x = points_xyzi[:, 0].copy()
     y = points_xyzi[:, 1].copy()
     z = points_xyzi[:, 2].copy()
 
-    dx = (range_x[1] - range_x[0]) / width
-    dy = (range_y[1] - range_y[0]) / height
-    dz = (range_z[1] - range_z[0]) / depth
+    if alpha > 0:
+        # Log-radial warping in Cartesian
+        r = np.sqrt(x ** 2 + y ** 2) + 1e-12
+        warp_factor = alpha * np.log(1.0 + r / alpha) / r  # → 1.0 at r→0
+        x_warped = x * warp_factor
+        y_warped = y * warp_factor
+        range_warped = alpha * np.log(1.0 + r_max / alpha)
+    else:
+        # 균일 Cartesian (워핑 없음)
+        x_warped = x
+        y_warped = y
+        range_warped = r_max
 
-    x_quan = (x - range_x[0]) / dx
-    y_quan = (y - range_y[0]) / dy
+    # 양자화: warped coords → pixel indices
+    x_quan = (x_warped + range_warped) / (2 * range_warped) * width
+    y_quan = (y_warped + range_warped) / (2 * range_warped) * height
+
+    # Z축 양자화 (기존과 동일)
+    dz = (range_z[1] - range_z[0]) / depth
     z_quan = (z - range_z[0]) / dz
 
     return np.stack((x_quan, y_quan, z_quan), axis=-1)

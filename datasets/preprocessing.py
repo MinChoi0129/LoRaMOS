@@ -186,8 +186,8 @@ def build_input_tensors(all_points, augmentor=None):
     return xyzi, bev_coord, rv_coord, spherical_coords, rv_input
 
 
-def build_label_tensors(label_list, spherical_coords, movable_label_list):
-    """3D 포인트 레이블 + 2D RV 레이블 텐서 생성."""
+def build_label_tensors(label_list, spherical_coords, movable_label_list, cartesian_coords):
+    """3D 포인트 레이블 + 2D RV 레이블 + 2D BEV Moving 레이블 텐서 생성."""
     current_moving_label_3d = torch.LongTensor(label_list[-1].astype(np.int64))
 
     spherical_coords_t0 = spherical_coords[-MAX_POINTS:]
@@ -199,4 +199,13 @@ def build_label_tensors(label_list, spherical_coords, movable_label_list):
     )
     current_movable_label_2d = torch.LongTensor(current_movable_label_2d)
 
-    return current_moving_label_3d, current_movable_label_2d
+    # Moving 2D BEV label (256×256) — 512 기준 좌표를 0.5 스케일
+    # cartesian_coords: [N, 2] — t0의 (col, row) 512 기준
+    bev_col = np.floor(cartesian_coords[:, 0] * 0.5).astype(np.int64)
+    bev_row = np.floor(cartesian_coords[:, 1] * 0.5).astype(np.int64)
+    valid = (bev_col >= 0) & (bev_col < 256) & (bev_row >= 0) & (bev_row < 256)
+    moving_label_2d_bev = np.zeros((256, 256), dtype=np.int64)
+    np.maximum.at(moving_label_2d_bev, (bev_row[valid], bev_col[valid]), label_list[-1][valid].astype(np.int64))
+    current_moving_label_2d_bev = torch.LongTensor(moving_label_2d_bev)
+
+    return current_moving_label_3d, current_movable_label_2d, current_moving_label_2d_bev

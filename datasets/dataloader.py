@@ -86,12 +86,18 @@ class DataloadTrain(Dataset):
             point_clouds, label_list, movable_label_list
         )
 
-        xyzi, bev_coord, rv_coord, spherical_coords_raw, rv_input = build_input_tensors(point_clouds, augmentor=self.augmentor)
+        pcd_input, bev_coord, rv_coord, spherical_coords_raw, rv_input = build_input_tensors(
+            point_clouds, augmentor=self.augmentor
+        )
         num_valid_t0 = valid_point_counts[-1]
 
-        label_3d, label_2d = build_label_tensors(label_list, spherical_coords_raw, movable_label_list)
+        cartesian_np = bev_coord[-1].numpy()
+        label_moving_3d, label_movable_rv, label_moving_bev = build_label_tensors(
+            label_list, spherical_coords_raw, movable_label_list, cartesian_np
+        )
 
-        return xyzi, bev_coord, rv_coord, rv_input, label_3d, label_2d, num_valid_t0
+        # 입력 → 좌표 → 라벨 → 메타
+        return pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, num_valid_t0
 
     def __len__(self):
         return len(self.flist)
@@ -130,23 +136,28 @@ class DataloadVal(Dataset):
         point_clouds, label_list, movable_label_list, valid_point_counts = pad_to_max(
             point_clouds, label_list, movable_label_list
         )
-        xyzi, bev_coord, rv_coord, spherical_coords_raw, rv_input = build_input_tensors(point_clouds)
-        moving_label_3d, movable_label_2d = build_label_tensors(label_list, spherical_coords_raw, movable_label_list)
+        pcd_input, bev_coord, rv_coord, spherical_coords_raw, rv_input = build_input_tensors(point_clouds)
+        cartesian_np = bev_coord[-1].numpy()
+        label_moving_3d, label_movable_rv, label_moving_bev = build_label_tensors(
+            label_list, spherical_coords_raw, movable_label_list, cartesian_np
+        )
 
         num_valid_t0 = valid_point_counts[-1]
-        current_seq_id = meta_list[-1][3]
-        current_file_id = meta_list[-1][4]
+        seq_id = meta_list[-1][3]
+        file_id = meta_list[-1][4]
 
+        # 입력 → 좌표 → 라벨 → 메타
         return (
-            xyzi,
+            pcd_input,
+            rv_input,
             bev_coord,
             rv_coord,
-            rv_input,
-            moving_label_3d,
-            movable_label_2d,
+            label_moving_3d,
+            label_movable_rv,
+            label_moving_bev,
             num_valid_t0,
-            current_seq_id,
-            current_file_id,
+            seq_id,
+            file_id,
         )
 
     def __len__(self):
@@ -176,13 +187,14 @@ class DataloadTest(Dataset):
 
         point_clouds, _, _, _ = load_sequence(meta_list)
         point_clouds, valid_point_counts = pad_to_max(point_clouds)
-        xyzi, bev_coord, rv_coord, _, rv_input = build_input_tensors(point_clouds)
+        pcd_input, bev_coord, rv_coord, _, rv_input = build_input_tensors(point_clouds)
 
         num_valid_t0 = valid_point_counts[-1]
-        current_seq_id = meta_list[-1][2]
-        current_file_id = meta_list[-1][3]
+        seq_id = meta_list[-1][2]
+        file_id = meta_list[-1][3]
 
-        return xyzi, bev_coord, rv_coord, rv_input, num_valid_t0, current_seq_id, current_file_id
+        # 입력 → 좌표 → 메타
+        return pcd_input, rv_input, bev_coord, rv_coord, num_valid_t0, seq_id, file_id
 
     def __len__(self):
         return len(self.flist)

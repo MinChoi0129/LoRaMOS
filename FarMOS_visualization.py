@@ -3,7 +3,7 @@ import torch
 from networks.MainNetwork import FarMOS
 from datasets.dataloader import DataloadVal
 from core.checkpoint import load_checkpoint
-from core.projector_unprojector import project, unproject
+from core.projector_unprojector import project
 from core.pretty_printer_and_saver import save_feature_as_img
 
 
@@ -22,28 +22,30 @@ if __name__ == "__main__":
     dataset = DataloadVal(args.sequence_dir)
 
     (
-        xyzi,
+        pcd_input,
+        rv_input,
         bev_coord,
         rv_coord,
-        rv_input,
-        moving_label_3d,
-        movable_label_2d,
+        label_moving_3d,
+        label_movable_rv,
+        label_moving_bev,
         num_valid_t0,
-        current_seq_id,
-        current_file_id,
+        seq_id,
+        file_id,
     ) = dataset[args.frame_id]
 
     # Add batch dimension
-    xyzi = xyzi.unsqueeze(0).to(device)
+    pcd_input = pcd_input.unsqueeze(0).to(device)
+    rv_input = rv_input.unsqueeze(0).to(device)
     bev_coord = bev_coord.unsqueeze(0).to(device)
     rv_coord = rv_coord.unsqueeze(0).to(device)
-    rv_input = rv_input.unsqueeze(0).to(device)
-    moving_label_3d = moving_label_3d.unsqueeze(0).to(device)
-    movable_label_rv = movable_label_2d.unsqueeze(0).to(device)
+    label_moving_3d = label_moving_3d.unsqueeze(0).to(device)
+    label_movable_rv = label_movable_rv.unsqueeze(0).to(device)
+    label_moving_bev = label_moving_bev.unsqueeze(0).to(device)
 
     # Generate label views
-    moving_label_bev = project(moving_label_3d.view(1, 1, -1, 1), bev_coord[:, -1], view="bev")
-    moving_label_rv = project(moving_label_3d.view(1, 1, -1, 1), rv_coord[:, -1], view="rv")
+    moving_label_bev = project(label_moving_3d.view(1, 1, -1, 1).float(), bev_coord[:, -1], view="bev")
+    moving_label_rv = project(label_moving_3d.view(1, 1, -1, 1).float(), rv_coord[:, -1], view="rv")
 
     # Model
     model = FarMOS().to(device)
@@ -58,14 +60,14 @@ if __name__ == "__main__":
     with torch.no_grad():
         # Labels
         save_feature_as_img(
-            [moving_label_bev, moving_label_rv, movable_label_rv],
-            ["GT_moving_bev", "GT_moving_rv", "GT_movable_rv"],
+            [moving_label_bev, moving_label_rv, label_movable_rv, label_moving_bev.unsqueeze(1).float()],
+            ["GT_moving_bev", "GT_moving_rv", "GT_movable_rv", "GT_moving_2d_bev"],
             "max",
         )
         print("Label saved.")
 
         # Inference + intermediate features
-        output = model.infer(xyzi, bev_coord, rv_coord, rv_input)
+        output = model.infer(pcd_input, rv_input, bev_coord, rv_coord)
         tensors, names = zip(*output["visualization"])
         save_feature_as_img(list(tensors), list(names), "max")
         print("Feature saved.")
