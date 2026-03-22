@@ -15,25 +15,25 @@ wandb_project: "FarMOS"
 
 ######################################################################
 # # Case 1: Standard Modern Setup (AdamW)
-optimizer: "adamw"
-lr: 0.001                # 1e-3
-weight_decay: 0.01       # AdamW에서는 0.01 ~ 0.05 권장
-scheduler: "cosine"
-epochs: 100
+# optimizer: "adamw"
+# lr: 0.001                # 1e-3
+# weight_decay: 0.01       # AdamW에서는 0.01 ~ 0.05 권장
+# scheduler: "cosine"
+# epochs: 100
 ######################################################################
-# # Case 2: High Generalization Setup (SGD)
-# optimizer: "sgd"
-# lr: 0.02               
-# momentum: 0.9 
-# nesterov: True
-# weight_decay: 0.001
+# Case 2: High Generalization Setup (SGD)
+optimizer: "sgd"
+lr: 0.02               
+momentum: 0.9 
+nesterov: True
+weight_decay: 0.001
 
-# scheduler: "step"
-# begin_epoch: 0
-# pct_start: 0.01            # warmup 비율 (70 * 0.01 ≈ 1 에폭 linear warmup)
-# step: 10                   # 매 10 에폭마다 lr 감소
-# decay_factor: 0.1          # 감소 비율 (lr *= 0.1)
-# epochs: 70
+scheduler: "step"
+begin_epoch: 0
+pct_start: 0.01            # warmup 비율 (70 * 0.01 ≈ 1 에폭 linear warmup)
+step: 10                   # 매 10 에폭마다 lr 감소
+decay_factor: 0.5          # 감소 비율 (lr *= 0.5)
+epochs: 100
 
 ######################################################################
 # # Case 3: Stable Step-down Setup (Adam)

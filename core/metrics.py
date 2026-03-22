@@ -46,18 +46,17 @@ def validate(model, val_loader, range_bins):
     with torch.no_grad():
         for batch in tqdm(val_loader, desc="  Val", dynamic_ncols=True):
             pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, num_valid, _, _ = batch
-            pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, num_valid = (
+            pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, num_valid = (
                 pcd_input.cuda(),
                 rv_input.cuda(),
                 bev_coord.cuda(),
                 rv_coord.cuda(),
                 label_moving_3d.cuda(),
                 label_movable_rv.cuda(),
-                label_moving_bev.cuda(),
                 num_valid.cuda(),
             )
 
-            out = model(pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev)
+            out = model(pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv)
             total_loss += out["loss"].item()
             total_mov += out["loss_moving"].item()
             total_mbl += out["loss_movable"].item()

@@ -24,13 +24,13 @@ if __name__ == "__main__":
 
     # Load real data once from dataloader
     print("Loading sample from dataloader...")
-    xyzi, bev_coord, rv_coord, rv_input, _, _, _, _, _ = dataset[4017]
+    pcd_input, rv_input, bev_coord, rv_coord, *_ = dataset[4017]
 
     # Add batch dimension
-    xyzi = xyzi.unsqueeze(0).to(device)
+    pcd_input = pcd_input.unsqueeze(0).to(device)
+    rv_input = rv_input.unsqueeze(0).to(device)
     bev_coord = bev_coord.unsqueeze(0).to(device)
     rv_coord = rv_coord.unsqueeze(0).to(device)
-    rv_input = rv_input.unsqueeze(0).to(device)
 
     # Model
     model = FarMOS().to(device)
@@ -42,7 +42,7 @@ if __name__ == "__main__":
     # Warmup
     for _ in tqdm(range(args.warmup_iters), desc="Warmup"):
         with torch.no_grad():
-            model.infer(xyzi, bev_coord, rv_coord, rv_input)
+            model.infer(pcd_input, rv_input, bev_coord, rv_coord)
     torch.cuda.synchronize()
 
     # Benchmark
@@ -53,7 +53,7 @@ if __name__ == "__main__":
         t0 = time.perf_counter()
 
         with torch.no_grad():
-            model.infer(xyzi, bev_coord, rv_coord, rv_input)
+            model.infer(pcd_input, rv_input, bev_coord, rv_coord)
 
         torch.cuda.synchronize()
         t1 = time.perf_counter()

@@ -72,27 +72,25 @@ if __name__ == "__main__":
         ep_loss, ep_mov, ep_mbl, n = 0.0, 0.0, 0.0, 0
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg['epochs']}", dynamic_ncols=True)
-        ep_mov2d = 0.0
         for batch in pbar:
             pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, _ = [x.cuda() for x in batch]
 
             optimizer.zero_grad()
-            out = model(pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev)
+            out = model(pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv)
             out["loss"].backward()
             optimizer.step()
 
             ep_loss += out["loss"].item()
             ep_mov += out["loss_moving"].item()
-            ep_mov2d += out["loss_moving_2d"].item()
             ep_mbl += out["loss_movable"].item()
             n += 1
-            pbar.set_postfix(loss=f"{ep_loss/n:.4f}", mov=f"{ep_mov/n:.4f}", mov2d=f"{ep_mov2d/n:.4f}", mbl=f"{ep_mbl/n:.4f}")
+            pbar.set_postfix(loss=f"{ep_loss/n:.4f}", mov=f"{ep_mov/n:.4f}", mbl=f"{ep_mbl/n:.4f}")
 
         scheduler.step()
         lr_now = optimizer.param_groups[0]["lr"]
         val = validate(model, val_loader, RANGE_BINS)
 
-        log_epoch(logger, epoch, ep_loss, ep_mov, ep_mov2d, ep_mbl, n, val, lr_now)
+        log_epoch(logger, epoch, ep_loss, ep_mov, ep_mbl, n, val, lr_now)
         save_all_best_checkpoints(model, optimizer, scheduler, epoch, ckpt_dir, val, best_ious, RANGE_BINS, logger)
 
     logger.log("Training finished.")

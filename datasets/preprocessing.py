@@ -199,12 +199,13 @@ def build_label_tensors(label_list, spherical_coords, movable_label_list, cartes
     )
     current_movable_label_2d = torch.LongTensor(current_movable_label_2d)
 
-    # Moving 2D BEV label (256×256) — 512 기준 좌표를 0.5 스케일
-    # cartesian_coords: [N, 2] — t0의 (col, row) 512 기준
-    bev_col = np.floor(cartesian_coords[:, 0] * 0.5).astype(np.int64)
-    bev_row = np.floor(cartesian_coords[:, 1] * 0.5).astype(np.int64)
-    valid = (bev_col >= 0) & (bev_col < 256) & (bev_row >= 0) & (bev_row < 256)
-    moving_label_2d_bev = np.zeros((256, 256), dtype=np.int64)
+    # Moving 2D BEV label — BEV_GRID_SIZE 해상도로 생성
+    # cartesian_coords: [N, 2] — t0의 (col, row) BEV_GRID_SIZE 기준
+    bev_h, bev_w = BEV_GRID_SIZE[0], BEV_GRID_SIZE[1]
+    bev_col = np.floor(cartesian_coords[:, 0]).astype(np.int64)
+    bev_row = np.floor(cartesian_coords[:, 1]).astype(np.int64)
+    valid = (bev_col >= 0) & (bev_col < bev_w) & (bev_row >= 0) & (bev_row < bev_h)
+    moving_label_2d_bev = np.zeros((bev_h, bev_w), dtype=np.int64)
     np.maximum.at(moving_label_2d_bev, (bev_row[valid], bev_col[valid]), label_list[-1][valid].astype(np.int64))
     current_moving_label_2d_bev = torch.LongTensor(moving_label_2d_bev)
 

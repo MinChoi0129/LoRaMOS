@@ -15,7 +15,7 @@ class MovingNet(nn.Module):
         # ---- Encoder ----
         self.enc1 = self._make_layer(block, in_channels, 64, num_blocks=3, stride=2)  # → [B, 64, 256, 256]
         self.enc2 = self._make_layer(block, 64, 128, num_blocks=3, stride=2)  # → [B, 128, 128, 128]
-        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2)  # → [B, 256, 64, 64]
+        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2, dilation=2)  # → [B, 256, 64, 64]
 
         # ---- Deformable Attention at bottleneck ----
         self.bottleneck_attn = backbone_moving.DeformAttnBottleneck(
@@ -31,6 +31,15 @@ class MovingNet(nn.Module):
         self.dec1 = backbone_moving.BasicConv2d(64 + 128 + 256, 128, kernel_size=3, padding=1)
         self.dec2 = backbone_moving.BasicConv2d(128, 32, kernel_size=3, padding=1)
 
+        # ---- Upsample to 512 ----
+        self.dec_up = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1, groups=32, bias=False),
+            nn.Conv2d(32, 32, kernel_size=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+        )
+
     def _make_layer(self, block, in_planes, out_planes, num_blocks, stride=2, dilation=1):
         layer = []
         layer.append(backbone_moving.DownSample2D(in_planes, out_planes, stride=stride))
@@ -39,16 +48,24 @@ class MovingNet(nn.Module):
         layer.append(block(out_planes, dilation=dilation, use_att=True))
         return nn.Sequential(*layer)
 
-    def forward(self, bev_feat):
+    def forward(self, bev_feat, movable_mask_bev):
         """
-        bev_feat: [B, T*64, 512, 512]  누적 BEV feature (movable 정보 이미 융합됨)
+        bev_feat:           [B, T*64, 512, 512]  누적 BEV feature
+        movable_mask_bev:   [B, 1, 512, 512]     movable 확률 마스크
         """
 
         # ---- Encoder ----
         e1 = self.enc1(bev_feat)  # [B, 64, 256, 256]
+        m1 = F.max_pool2d(movable_mask_bev, kernel_size=2, stride=2)
+        e1 = e1 * (1 + m1)
+
         e2 = self.enc2(e1)  # [B, 128, 128, 128]
+        m2 = F.max_pool2d(m1, kernel_size=2, stride=2)
+        e2 = e2 * (1 + m2)
 
         e3 = self.enc3(e2)  # [B, 256, 64, 64]
+        m3 = F.max_pool2d(m2, kernel_size=2, stride=2)
+        e3 = e3 * (1 + m3)
 
         # ---- Deformable Attention ----
         e3 = self.bottleneck_attn(e3)  # [B, 256, 64, 64]
@@ -61,6 +78,7 @@ class MovingNet(nn.Module):
         dec = torch.cat([e1, e2_up, e3_up], dim=1)  # [B, 448, 256, 256]
         dec = self.dec1(dec)  # [B, 128, 256, 256]
         dec = self.dec2(dec)  # [B, 32, 256, 256]
+        dec = self.dec_up(dec)  # [B, 32, 512, 512]
 
         return dec
 
