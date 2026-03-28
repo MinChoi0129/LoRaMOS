@@ -14,10 +14,13 @@ cd deformattn/ && python setup.py build_ext --inplace && cd ..
 
 ## Dataset
 
-SemanticKITTI format: `sequences/{seq_id}/{calib.txt, poses.txt, velodyne/, labels/}`
+All datasets follow SemanticKITTI format: `sequences/{seq_id}/{calib.txt, poses.txt, velodyne/, labels/}`
 
-- **SemanticKITTI**: Train 00-07,09-10 / Val 08 / Test 11-21
-- **Apollo** (cross-dataset): Test 00-04, labels `0`=static `252`=moving
+| Dataset | Required | Description |
+|---|---|---|
+| [SemanticKITTI](https://) | Yes | Train 00-07,09-10 / Val 08 / Test 11-21 |
+| [Object Bank](https://) | For training | Copy-paste augmentation objects. Set path in `datasets/config.py` |
+| [Apollo](https://) | Optional | Cross-dataset eval (Test 00-04). Inference directly with SemanticKITTI-trained model, no additional training |
 
 Intensity is auto-normalized to [0,1] at load time (values >1.0 are divided by 255).
 
@@ -34,28 +37,18 @@ Experiments auto-numbered as `logs/ExpXX/`. Set `MODE="keep"` and `RESUME_EXP` t
 ## Prediction
 
 ```bash
-bash scripts/val_kitti.sh    # SemanticKITTI
-bash scripts/val_apollo.sh   # Apollo
+bash scripts/val.sh              # SemanticKITTI
+bash scripts/apollo/val.sh       # Apollo
 ```
 
 ## Evaluation
 
 ```bash
-bash scripts/eval_kitti.sh   # SemanticKITTI
-bash scripts/eval_apollo.sh  # Apollo
+bash scripts/eval.sh             # SemanticKITTI
+bash scripts/apollo/eval.sh      # Apollo
 ```
 
 Outputs overall + range-wise (10m bins) IoU for static/moving.
-
-### Label mapping for other models' predictions
-
-Edit `learning_map` in the dataset config to match the prediction format:
-
-| Model | Static | Moving |
-|---|---|---|
-| FarMOS / 4DMOS / MF-MOS | 9 | 251 |
-| StreamMOS | 1 | 2 |
-| Apollo GT | 0 | 252 |
 
 ## Speed Benchmark
 

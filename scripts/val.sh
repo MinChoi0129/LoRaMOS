@@ -2,7 +2,7 @@
 # FarMOS Prediction - SemanticKITTI
 
 EXP_ID="Exp36"
-MODE="test"  # "val" = seq 08, "test" = seq 11-21
+MODE="val"  # "val" = seq 08, "test" = seq 11-21
 
 # ============================================================
 SEQUENCE_DIR="/home/ssd_data/ROOT_KITTI/KITTI/dataset/sequences/"
