@@ -45,7 +45,7 @@ def validate(model, val_loader, range_bins):
 
     with torch.no_grad():
         for batch in tqdm(val_loader, desc="  Val", dynamic_ncols=True):
-            pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, num_valid, _, _ = batch
+            pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, _, label_movable_rv, label_moving_bev, num_valid, _, _ = batch
             pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, num_valid = (
                 pcd_input.cuda(),
                 rv_input.cuda(),
@@ -62,10 +62,9 @@ def validate(model, val_loader, range_bins):
             total_mbl += out["loss_movable"].item()
             n += 1
 
-            # Moving evaluation (3D point-wise)
             moving_pred = out["moving_logit_3d"].squeeze(-1).argmax(dim=1).cpu().numpy()
             moving_gt = label_moving_3d.cpu().numpy()
-            depth = pcd_input[:, -1, 4, :, 0].cpu().numpy()  # [B, N]
+            depth = pcd_input[:, -1, 4, :, 0].cpu().numpy()
 
             for b in range(moving_pred.shape[0]):
                 nv = num_valid[b].item()
@@ -79,7 +78,6 @@ def validate(model, val_loader, range_bins):
                     if rmask.any():
                         reval.addBatch(pred_v[rmask], gt_v[rmask])
 
-            # Movable evaluation (2D RV pixel-wise)
             movable_pred = out["movable_logit_2d"].argmax(dim=1).cpu().numpy()
             movable_gt = label_movable_rv.cpu().numpy()
             for b in range(movable_pred.shape[0]):

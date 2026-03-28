@@ -1,15 +1,7 @@
-"""포인트 클라우드 I/O, 변환, 양자화, 피쳐/레이블 생성 유틸리티."""
-
 import numpy as np
 
 
-# ============================================================
-# Calibration & Pose
-# ============================================================
-
-
 def parse_calibration(filename):
-    """KITTI calib.txt 파싱 -> 4x4 변환 행렬 dict 반환"""
     calibration = {}
     with open(filename, "r") as f:
         for line in f:
@@ -25,7 +17,6 @@ def parse_calibration(filename):
 
 
 def parse_poses(filename, calibration):
-    """KITTI poses.txt -> LiDAR 좌표계 기준 4x4 pose 행렬 리스트 반환"""
     poses = []
     Tr = calibration["Tr"]
     Tr_inv = np.linalg.inv(Tr)
@@ -41,13 +32,7 @@ def parse_poses(filename, calibration):
     return poses
 
 
-# ============================================================
-# Point Transform & Label Remap
-# ============================================================
-
-
 def transform_points(points, transform_matrix):
-    """4x4 pose 변환 행렬을 포인트 클라우드에 적용 (intensity 보존)"""
     result = points.copy()
     homogeneous = result[:, :4].T
     homogeneous[-1] = 1.0
@@ -57,23 +42,14 @@ def transform_points(points, transform_matrix):
 
 
 def relabel(raw_labels, label_map):
-    """원본 semantic label -> learning_map에 따라 재매핑"""
     remapped = np.zeros(raw_labels.shape[0], dtype=raw_labels.dtype)
     for source_label, target_label in label_map.items():
         remapped[raw_labels == source_label] = target_label
     return remapped
 
 
-# ============================================================
-# Quantization
-# ============================================================
-
-
 def quantize_cartesian(points_xyzi, range_x, range_y, range_z, grid_size, alpha=None):
-    """3D 좌표 -> Log-Radial Warped Cartesian BEV 격자 인덱스로 양자화.
-    (x,y)를 직접 워핑: warp = α·log(1+r/α)/r, x'=x*warp, y'=y*warp.
-    근거리(warp≈1)는 거의 변하지 않고, 원거리만 압축. alpha=0이면 균일 Cartesian.
-    Returns: [N, 3] — [col(x'), row(y'), depth(z)]"""
+    """Log-Radial Warped Cartesian BEV 양자화. Returns: [N, 3] — [col, row, depth]"""
     from datasets.config import BEV_WARP_ALPHA
     height, width, depth = grid_size
     alpha = alpha if alpha is not None else BEV_WARP_ALPHA
@@ -84,23 +60,19 @@ def quantize_cartesian(points_xyzi, range_x, range_y, range_z, grid_size, alpha=
     z = points_xyzi[:, 2].copy()
 
     if alpha > 0:
-        # Log-radial warping in Cartesian
         r = np.sqrt(x ** 2 + y ** 2) + 1e-12
         warp_factor = alpha * np.log(1.0 + r / alpha) / r  # → 1.0 at r→0
         x_warped = x * warp_factor
         y_warped = y * warp_factor
         range_warped = alpha * np.log(1.0 + r_max / alpha)
     else:
-        # 균일 Cartesian (워핑 없음)
         x_warped = x
         y_warped = y
         range_warped = r_max
 
-    # 양자화: warped coords → pixel indices
     x_quan = (x_warped + range_warped) / (2 * range_warped) * width
     y_quan = (y_warped + range_warped) / (2 * range_warped) * height
 
-    # Z축 양자화 (기존과 동일)
     dz = (range_z[1] - range_z[0]) / depth
     z_quan = (z - range_z[0]) / dz
 
@@ -108,7 +80,7 @@ def quantize_cartesian(points_xyzi, range_x, range_y, range_z, grid_size, alpha=
 
 
 def quantize_spherical(points_xyzi, phi_range, theta_range, r_range, grid_size):
-    """3D 좌표 -> 구면 격자 인덱스로 양자화. Returns: [N, 3] — [col(phi), row(theta), depth(r)]"""
+    """구면 격자 양자화. Returns: [N, 3] — [col(phi), row(theta), depth(r)]"""
     height, width, depth = grid_size
 
     phi_rad_min = np.radians(phi_range[0])
@@ -134,13 +106,8 @@ def quantize_spherical(points_xyzi, phi_range, theta_range, r_range, grid_size):
     return np.stack((phi_quan, theta_quan, r_quan), axis=-1)
 
 
-# ============================================================
-# Feature & Label Generation
-# ============================================================
-
-
 def make_point_features(points_xyzi, cartesian_coords):
-    """7채널 포인트 피쳐: [x, y, z, intensity, distance, diff_x, diff_y]"""
+    """7채널 피쳐: [x, y, z, intensity, distance, diff_x, diff_y]"""
     x = points_xyzi[:, 0].copy()
     y = points_xyzi[:, 1].copy()
     z = points_xyzi[:, 2].copy()
@@ -152,7 +119,7 @@ def make_point_features(points_xyzi, cartesian_coords):
 
 
 def generate_rv_label(spherical_coord_t0, label_t0, rv_height, rv_width):
-    """3D 레이블 -> Range View 2D 레이블 (Painter's algorithm: nearest point 우선)"""
+    """3D label -> RV 2D label (Painter's algorithm)"""
     label_2d = np.zeros((rv_height, rv_width), dtype=np.int64)
 
     phi_idx = np.floor(spherical_coord_t0[:, 0]).astype(np.int64)
@@ -170,7 +137,7 @@ def generate_rv_label(spherical_coord_t0, label_t0, rv_height, rv_width):
 
 
 def generate_rv_features(points_xyzi_t0, spherical_coord_t0, rv_height, rv_width):
-    """3D 포인트 -> Range View 2D 피처맵 [5, H, W] (Painter's algorithm)"""
+    """3D points -> RV 2D feature map [5, H, W] (Painter's algorithm)"""
     rv_features = np.zeros((5, rv_height, rv_width), dtype=np.float32)
 
     phi_idx = np.floor(spherical_coord_t0[:, 0]).astype(np.int64)

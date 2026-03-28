@@ -6,11 +6,6 @@ from torch.utils.data import DataLoader
 from datasets.dataloader import DataloadTrain, DataloadVal, DataloadTest
 
 
-# ============================================================
-# Optimizer / Scheduler
-# ============================================================
-
-
 def build_optimizer(cfg, model):
     name = cfg["optimizer"].lower()
     if name == "adam":
@@ -60,13 +55,8 @@ def build_scheduler(cfg, optimizer):
         raise ValueError(f"Unknown scheduler: {name}")
 
 
-# ============================================================
-# DataLoader
-# ============================================================
-
-
 def build_train_loader(cfg):
-    dataset = DataloadTrain(cfg["sequence_dir"])
+    dataset = DataloadTrain(cfg["sequence_dir"], cfg["dataset_config"])
     return DataLoader(
         dataset,
         batch_size=cfg["batch_size"],
@@ -77,8 +67,8 @@ def build_train_loader(cfg):
     )
 
 
-def build_val_loader(sequence_dir, num_workers=4):
-    dataset = DataloadVal(sequence_dir)
+def build_val_loader(sequence_dir, task_config_path, num_workers=4):
+    dataset = DataloadVal(sequence_dir, task_config_path)
     return DataLoader(dataset, batch_size=1, shuffle=False, num_workers=num_workers, pin_memory=True)
 
 
@@ -87,13 +77,7 @@ def build_test_loader(sequence_dir, seq_num, batch_size=1, num_workers=4):
     return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
 
 
-# ============================================================
-# Code Snapshot
-# ============================================================
-
-
 def snapshot_code(log_dir):
-    """Copy all source files (excluding logs/) to logs/ExpXX/code/."""
     code_dir = os.path.join(log_dir, "code")
     os.makedirs(code_dir, exist_ok=True)
 

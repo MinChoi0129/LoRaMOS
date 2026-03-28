@@ -7,11 +7,6 @@ from scipy.spatial import Delaunay
 from datasets.config import MAX_POINTS
 
 
-# ============================================================
-# Point Cloud Augmentation (global transforms)
-# ============================================================
-
-
 class DataAugment:
     def __init__(
         self,
@@ -32,10 +27,6 @@ class DataAugment:
         self.flip_y = flip_y
 
     def __call__(self, points):
-        """
-        포인트 클라우드 증강: noise -> shift -> scale -> flip -> rotation
-        Input/Output: [N, C] (x, y, z, intensity, ...)
-        """
         noise = np.random.normal(self.noise_mean, self.noise_std, size=(points.shape[0], 3))
         points[:, :3] += noise
 
@@ -61,11 +52,7 @@ class DataAugment:
         return points
 
 
-# ============================================================
-# Copy-Paste Augmentation (sequence-level object insertion)
-# ============================================================
-
-ROAD_LABEL = 40  # SemanticKITTI road label (raw semantic id)
+ROAD_LABEL = 40
 
 
 def _in_range(v, r):
@@ -99,15 +86,6 @@ def _rotate_along_z(pcds, theta_deg):
 
 
 class SequenceCopyPaste:
-    """T-frame Copy-Paste augmentation for FarMOS.
-
-    Usage:
-        cp = SequenceCopyPaste(object_dir, paste_max_obj_num=3)
-        point_clouds, label_list, movable_label_list = cp(
-            point_clouds, label_list, movable_label_list, raw_semantic_labels
-        )
-    """
-
     def __init__(self, object_dir, paste_max_obj_num=3):
         self.object_dir = object_dir
         self.sub_dirs = ('car', 'truck', 'other-vehicle', 'person',
@@ -128,7 +106,6 @@ class SequenceCopyPaste:
             print(f'[CopyPaste] {cat}: {len(files)}')
 
     def _make_sequential_obj(self, fname, seq_num):
-        """객체를 T프레임에 걸쳐 속도만큼 이동시켜 시퀀스 생성."""
         npz = np.load(fname)
         pcds = npz['pcds']
         cat = str(npz['cate'])

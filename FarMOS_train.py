@@ -48,7 +48,7 @@ if __name__ == "__main__":
     init_wandb(argparse.Namespace(**cfg, wandb_name=wandb_name), log_dir=args.log_dir, resume=args.resume)
 
     train_loader = build_train_loader(cfg)
-    val_loader = build_val_loader(cfg["sequence_dir"], cfg["num_workers"])
+    val_loader = build_val_loader(cfg["sequence_dir"], cfg["dataset_config"], cfg["num_workers"])
 
     model = FarMOS().cuda()
     model = torch.compile(model)
@@ -73,7 +73,9 @@ if __name__ == "__main__":
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg['epochs']}", dynamic_ncols=True)
         for batch in pbar:
-            pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, _ = [x.cuda() for x in batch]
+            pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, _ = [
+                x.cuda() for x in batch
+            ]
 
             optimizer.zero_grad()
             out = model(pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv)

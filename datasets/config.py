@@ -1,4 +1,3 @@
-TASK_CONFIG_PATH = "config/semantic-kitti-mos.yaml"
 STATIC_FRAMES_PATH = "config/train_split_dynamic_pointnumber.txt"
 OBJECT_BANK_DIR = "/home/ssd_data/ROOT_KITTI/object_bank_semkitti/"
 

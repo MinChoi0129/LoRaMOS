@@ -1,5 +1,3 @@
-"""파일리스트 구축, 시퀀스 로드, 패딩, 텐서 변환 파이프라인."""
-
 import os
 import numpy as np
 import torch
@@ -28,16 +26,8 @@ from datasets.pointcloud import (
 from core.pretty_printer_and_saver import shprint
 
 
-# ============================================================
-# File List
-# ============================================================
-
-
 def build_sequence_filelist(sequence_dir, seq_id, poses, include_labels=True):
-    """
-    단일 시퀀스에 대해 T=NUM_TEMPORAL_FRAMES 프레임씩 묶은 메타 리스트 구축.
-    프레임 순서: [t-(T-1), ..., t-1, t0]  (현재 프레임 t0이 마지막 index)
-    """
+    """T프레임씩 묶은 메타 리스트 구축. 순서: [t-(T-1), ..., t-1, t0]"""
     seq_path = os.path.join(sequence_dir, seq_id)
     velodyne_path = os.path.join(seq_path, "velodyne")
     labels_path = os.path.join(seq_path, "labels")
@@ -67,18 +57,7 @@ def build_sequence_filelist(sequence_dir, seq_id, poses, include_labels=True):
     return flist
 
 
-# ============================================================
-# Sequence Loading
-# ============================================================
-
-
 def load_sequence(meta_list, learning_map=None, movable_learning_map=None):
-    """
-    T개 프레임의 포인트 클라우드 (+ 레이블) 로드.
-    meta 튜플 길이로 레이블 유무 자동 판별:
-      5-tuple: (fname_pcd, fname_label, pose_diff, seq_id, file_id)
-      4-tuple: (fname_pcd, pose_diff, seq_id, file_id)
-    """
     point_clouds = []
     label_list = []
     movable_label_list = []
@@ -93,6 +72,8 @@ def load_sequence(meta_list, learning_map=None, movable_learning_map=None):
             fname_pcd, pose_diff, _, _ = frame_meta
 
         raw_points = np.fromfile(fname_pcd, dtype=np.float32).reshape(-1, 4)
+        if raw_points[:, 3].max() > 1.0:
+            raw_points[:, 3] /= 255.0
         point_clouds.append(transform_points(raw_points, pose_diff))
 
         if has_labels:
@@ -107,18 +88,10 @@ def load_sequence(meta_list, learning_map=None, movable_learning_map=None):
     return point_clouds, label_list, movable_label_list, raw_semantic_list
 
 
-# ============================================================
-# Padding
-# ============================================================
-
-
 def pad_to_max(point_clouds, label_list=None, movable_label_list=None):
-    """
-    MAX_POINTS까지 더미 패딩 (필터링 없음 -> num_valid = 원본 포인트 수).
-    """
     valid_point_counts = []
     has_labels = label_list is not None
-    has_movable = movable_label_list is not None
+    has_movable = movable_label_list != []
 
     for t in range(len(point_clouds)):
         num_valid = point_clouds[t].shape[0]
@@ -145,17 +118,7 @@ def pad_to_max(point_clouds, label_list=None, movable_label_list=None):
     return point_clouds, valid_point_counts
 
 
-# ============================================================
-# Tensor Building
-# ============================================================
-
-
 def build_input_tensors(all_points, augmentor=None):
-    """
-    T개 프레임 -> 양자화 + 7채널 피쳐 -> 텐서 변환.
-    Returns: xyzi [T,7,N,1], bev_coord [T,N,2], rv_coord [T,N,2],
-             spherical_coords_raw [T*N,3], rv_input [5,H,W]
-    """
     all_points_concat = np.concatenate(all_points, axis=0)
 
     if augmentor is not None:
@@ -171,7 +134,6 @@ def build_input_tensors(all_points, augmentor=None):
     xyzi = xyzi.view(NUM_TEMPORAL_FRAMES, MAX_POINTS, 7, 1)
     xyzi = xyzi.permute(0, 2, 1, 3).contiguous()
 
-    # 좌표: [T, N, 2] — 항상 [col, row] 순서 (depth 제외)
     bev_coord = torch.FloatTensor(cartesian_coords[:, :2].copy().astype(np.float32))
     bev_coord = bev_coord.view(NUM_TEMPORAL_FRAMES, MAX_POINTS, 2)
 
@@ -187,8 +149,8 @@ def build_input_tensors(all_points, augmentor=None):
 
 
 def build_label_tensors(label_list, spherical_coords, movable_label_list, cartesian_coords):
-    """3D 포인트 레이블 + 2D RV 레이블 + 2D BEV Moving 레이블 텐서 생성."""
     current_moving_label_3d = torch.LongTensor(label_list[-1].astype(np.int64))
+    current_movable_label_3d = torch.LongTensor(movable_label_list[-1].astype(np.int64))
 
     spherical_coords_t0 = spherical_coords[-MAX_POINTS:]
     current_movable_label_2d = generate_rv_label(
@@ -199,8 +161,6 @@ def build_label_tensors(label_list, spherical_coords, movable_label_list, cartes
     )
     current_movable_label_2d = torch.LongTensor(current_movable_label_2d)
 
-    # Moving 2D BEV label — BEV_GRID_SIZE 해상도로 생성
-    # cartesian_coords: [N, 2] — t0의 (col, row) BEV_GRID_SIZE 기준
     bev_h, bev_w = BEV_GRID_SIZE[0], BEV_GRID_SIZE[1]
     bev_col = np.floor(cartesian_coords[:, 0]).astype(np.int64)
     bev_row = np.floor(cartesian_coords[:, 1]).astype(np.int64)
@@ -209,4 +169,4 @@ def build_label_tensors(label_list, spherical_coords, movable_label_list, cartes
     np.maximum.at(moving_label_2d_bev, (bev_row[valid], bev_col[valid]), label_list[-1][valid].astype(np.int64))
     current_moving_label_2d_bev = torch.LongTensor(moving_label_2d_bev)
 
-    return current_moving_label_3d, current_movable_label_2d, current_moving_label_2d_bev
+    return current_moving_label_3d, current_movable_label_3d, current_movable_label_2d, current_moving_label_2d_bev

@@ -1,0 +1,21 @@
+# Apollo GT: 0=static, 252=moving
+# SemanticKITTI/4DMOS/MF-MOS pred: 9=static, 251=moving
+name: "apollo"
+labels:
+  0: "unlabeled"
+  252: "moving"
+learning_map:
+  0: 1      # Apollo GT static
+  9: 1      # SemanticKITTI pred static
+  251: 2    # SemanticKITTI pred moving
+  252: 2    # Apollo GT moving
+learning_map_inv:
+  0: 0
+  1: 0
+  2: 252
+learning_ignore:
+  0: True
+  1: False
+  2: False
+split:
+  test: [0, 1, 2, 3, 4]

@@ -16,12 +16,7 @@ def shprint(*obj):
 
 
 def save_feature_as_img(variables, variable_names, channel_pool="max"):
-    """
-    접두사 규칙:
-      GT_   / pred_  → class map (viridis, 0~2)
-      mask_          → 확률 heatmap (viridis, 0~1)
-      feat_          → feature channel-pooled (viridis, auto)
-    """
+    """Prefix rules: GT_/pred_ → class map (0~2), mask_ → heatmap (0~1), feat_ → channel-pooled."""
     save_dir = "images"
     os.makedirs(save_dir, exist_ok=True)
 

@@ -4,7 +4,6 @@ import glob
 import numpy as np
 import yaml
 from tqdm import tqdm
-
 from core.metrics import iouEval
 
 
@@ -61,15 +60,10 @@ def evaluate(args, task_cfg):
 
             pred = load_labels(pred_path, learning_map)
             gt = load_labels(gt_path, learning_map)
-
-            # pred may be shorter than gt (padded points excluded during save)
-            n = min(len(pred), len(gt))
-            pred, gt = pred[:n], gt[:n]
-
+            assert len(pred) == len(gt)
             overall_eval.addBatch(pred, gt)
 
-            # Range-wise
-            xyz = load_pointcloud(pc_path)[:n]
+            xyz = load_pointcloud(pc_path)
             depth = np.linalg.norm(xyz, axis=1)
             for (rmin, rmax), reval in range_evals.items():
                 mask = (depth >= rmin) & (depth < rmax)

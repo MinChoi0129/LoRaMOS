@@ -1,14 +1,14 @@
 #!/bin/bash
+# FarMOS Visualization
 
-# ============================================================
-# FarMOS Speed Benchmark
-# ============================================================
-
-# Dataset
-SEQUENCE_DIR="/home/ssd_data/ROOT_KITTI/KITTI/dataset/sequences/"
 FRAME_ID=4017
-CHECKPOINT="/home/work/FarMOS/logs/Exp32/checkpoints/best_40_50m_34.pth"
+CHECKPOINT="/home/work/FarMOS/logs/Exp36/checkpoints/best_30_40m_80(best).pth"
 
 # ============================================================
+SEQUENCE_DIR="/home/ssd_data/ROOT_KITTI/KITTI/dataset/sequences/"
 
-python FarMOS_visualization.py --sequence_dir ${SEQUENCE_DIR} --frame_id ${FRAME_ID} --checkpoint ${CHECKPOINT}
+python FarMOS_visualization.py \
+    --sequence_dir ${SEQUENCE_DIR} \
+    --config config/semantic-kitti-mos.yaml \
+    --frame_id ${FRAME_ID} \
+    --checkpoint ${CHECKPOINT}

@@ -1,11 +1,9 @@
-"""Train / Val / Test Dataset 클래스."""
-
 import os
 import yaml
 import numpy as np
 from torch.utils.data import Dataset
 
-from datasets.config import TASK_CONFIG_PATH, STATIC_FRAMES_PATH, OBJECT_BANK_DIR
+from datasets.config import STATIC_FRAMES_PATH, OBJECT_BANK_DIR
 from datasets.augmentation import DataAugment, SequenceCopyPaste
 from datasets.pointcloud import parse_calibration, parse_poses
 from datasets.preprocessing import (
@@ -17,17 +15,12 @@ from datasets.preprocessing import (
 )
 
 
-# ============================================================
-# Dataset: Train
-# ============================================================
-
-
 class DataloadTrain(Dataset):
-    def __init__(self, sequence_dir):
+    def __init__(self, sequence_dir, task_config_path):
         self.sequence_dir = sequence_dir
         self.flist = []
 
-        with open(TASK_CONFIG_PATH, "r") as f:
+        with open(task_config_path, "r") as f:
             self.task_cfg = yaml.load(f, Loader=yaml.FullLoader)
 
         self.movable_learning_map = self.task_cfg["movable_learning_map"]
@@ -46,7 +39,6 @@ class DataloadTrain(Dataset):
         print(f"[Train] After static removal:  {len(self.flist)} samples")
 
     def _remove_static_frames(self):
-        """dynamic point가 존재하는 프레임만 유지 (txt 파일 기반 필터링)"""
         if not os.path.exists(STATIC_FRAMES_PATH):
             print(f"  Warning: {STATIC_FRAMES_PATH} not found, skipping static removal.")
             return
@@ -92,28 +84,22 @@ class DataloadTrain(Dataset):
         num_valid_t0 = valid_point_counts[-1]
 
         cartesian_np = bev_coord[-1].numpy()
-        label_moving_3d, label_movable_rv, label_moving_bev = build_label_tensors(
+        label_moving_3d, _, label_movable_rv, label_moving_bev = build_label_tensors(
             label_list, spherical_coords_raw, movable_label_list, cartesian_np
         )
 
-        # 입력 → 좌표 → 라벨 → 메타
         return pcd_input, rv_input, bev_coord, rv_coord, label_moving_3d, label_movable_rv, label_moving_bev, num_valid_t0
 
     def __len__(self):
         return len(self.flist)
 
 
-# ============================================================
-# Dataset: Validation
-# ============================================================
-
-
 class DataloadVal(Dataset):
-    def __init__(self, sequence_dir):
+    def __init__(self, sequence_dir, task_config_path):
         self.sequence_dir = sequence_dir
         self.flist = []
 
-        with open(TASK_CONFIG_PATH, "r") as f:
+        with open(task_config_path, "r") as f:
             self.task_cfg = yaml.load(f, Loader=yaml.FullLoader)
 
         self.movable_learning_map = self.task_cfg["movable_learning_map"]
@@ -138,7 +124,7 @@ class DataloadVal(Dataset):
         )
         pcd_input, bev_coord, rv_coord, spherical_coords_raw, rv_input = build_input_tensors(point_clouds)
         cartesian_np = bev_coord[-1].numpy()
-        label_moving_3d, label_movable_rv, label_moving_bev = build_label_tensors(
+        label_moving_3d, label_movable_3d, label_movable_rv, label_moving_bev = build_label_tensors(
             label_list, spherical_coords_raw, movable_label_list, cartesian_np
         )
 
@@ -146,13 +132,13 @@ class DataloadVal(Dataset):
         seq_id = meta_list[-1][3]
         file_id = meta_list[-1][4]
 
-        # 입력 → 좌표 → 라벨 → 메타
         return (
             pcd_input,
             rv_input,
             bev_coord,
             rv_coord,
             label_moving_3d,
+            label_movable_3d,
             label_movable_rv,
             label_moving_bev,
             num_valid_t0,
@@ -162,11 +148,6 @@ class DataloadVal(Dataset):
 
     def __len__(self):
         return len(self.flist)
-
-
-# ============================================================
-# Dataset: Test
-# ============================================================
 
 
 class DataloadTest(Dataset):
@@ -193,7 +174,6 @@ class DataloadTest(Dataset):
         seq_id = meta_list[-1][2]
         file_id = meta_list[-1][3]
 
-        # 입력 → 좌표 → 메타
         return pcd_input, rv_input, bev_coord, rv_coord, num_valid_t0, seq_id, file_id
 
     def __len__(self):

@@ -1,4 +1,0 @@
-# ninja log v5
-0	2938	1772958118528939856	/home/work/FarMOS/deformattn/build/temp.linux-x86_64-cpython-39/home/work/FarMOS/deformattn/src/cpu/ms_deform_attn_cpu.o	eb9f474b8b833d18
-1	8171	1772958123748344584	/home/work/FarMOS/deformattn/build/temp.linux-x86_64-cpython-39/home/work/FarMOS/deformattn/src/vision.o	47b791f681ef2e08
-0	51403	1772958166986124047	/home/work/FarMOS/deformattn/build/temp.linux-x86_64-cpython-39/home/work/FarMOS/deformattn/src/cuda/ms_deform_attn_cuda.o	cfd5d1dd8346f397

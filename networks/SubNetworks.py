@@ -12,12 +12,9 @@ class MovingNet(nn.Module):
         super(MovingNet, self).__init__()
         block = backbone_moving.BasicBlock
 
-        # ---- Encoder ----
-        self.enc1 = self._make_layer(block, in_channels, 64, num_blocks=3, stride=2)  # → [B, 64, 256, 256]
-        self.enc2 = self._make_layer(block, 64, 128, num_blocks=3, stride=2)  # → [B, 128, 128, 128]
-        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2, dilation=2)  # → [B, 256, 64, 64]
-
-        # ---- Deformable Attention at bottleneck ----
+        self.enc1 = self._make_layer(block, in_channels, 64, num_blocks=3, stride=2)
+        self.enc2 = self._make_layer(block, 64, 128, num_blocks=3, stride=2)
+        self.enc3 = self._make_layer(block, 128, 256, num_blocks=4, stride=2, dilation=2)
         self.bottleneck_attn = backbone_moving.DeformAttnBottleneck(
             in_channels=256,
             d_model=128,
@@ -27,11 +24,8 @@ class MovingNet(nn.Module):
             num_layers=2,
         )
 
-        # ---- Decoder (Feature Pyramid → 256×256 출력) ----
         self.dec1 = backbone_moving.BasicConv2d(64 + 128 + 256, 128, kernel_size=3, padding=1)
         self.dec2 = backbone_moving.BasicConv2d(128, 32, kernel_size=3, padding=1)
-
-        # ---- Upsample to 512 ----
         self.dec_up = nn.Sequential(
             nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
             nn.Conv2d(32, 32, kernel_size=3, padding=1, groups=32, bias=False),
@@ -49,36 +43,25 @@ class MovingNet(nn.Module):
         return nn.Sequential(*layer)
 
     def forward(self, bev_feat, movable_mask_bev):
-        """
-        bev_feat:           [B, T*64, 512, 512]  누적 BEV feature
-        movable_mask_bev:   [B, 1, 512, 512]     movable 확률 마스크
-        """
-
-        # ---- Encoder ----
-        e1 = self.enc1(bev_feat)  # [B, 64, 256, 256]
+        e1 = self.enc1(bev_feat)
         m1 = F.max_pool2d(movable_mask_bev, kernel_size=2, stride=2)
         e1 = e1 * (1 + m1)
 
-        e2 = self.enc2(e1)  # [B, 128, 128, 128]
+        e2 = self.enc2(e1)
         m2 = F.max_pool2d(m1, kernel_size=2, stride=2)
         e2 = e2 * (1 + m2)
 
-        e3 = self.enc3(e2)  # [B, 256, 64, 64]
-        m3 = F.max_pool2d(m2, kernel_size=2, stride=2)
-        e3 = e3 * (1 + m3)
+        e3 = self.enc3(e2)
+        e3 = self.bottleneck_attn(e3)
 
-        # ---- Deformable Attention ----
-        e3 = self.bottleneck_attn(e3)  # [B, 256, 64, 64]
-
-        # ---- Decoder: Feature Pyramid ----
         target_size = e1.shape[2:]
         e2_up = F.interpolate(e2, size=target_size, mode="bilinear", align_corners=True)
         e3_up = F.interpolate(e3, size=target_size, mode="bilinear", align_corners=True)
 
-        dec = torch.cat([e1, e2_up, e3_up], dim=1)  # [B, 448, 256, 256]
-        dec = self.dec1(dec)  # [B, 128, 256, 256]
-        dec = self.dec2(dec)  # [B, 32, 256, 256]
-        dec = self.dec_up(dec)  # [B, 32, 512, 512]
+        dec = torch.cat([e1, e2_up, e3_up], dim=1)
+        dec = self.dec1(dec)
+        dec = self.dec2(dec)
+        dec = self.dec_up(dec)
 
         return dec
 
@@ -87,50 +70,38 @@ class MovableNet(nn.Module):
     def __init__(self, in_ch=5, out_ch=3, num_batch=6, height=64, width=2048):
         super(MovableNet, self).__init__()
 
-        # Context Blocks: range image → 32ch feature
         self.downCntx = ResContextBlock(in_ch, 32)
         self.metaConv = MetaKernel(num_batch=num_batch, feat_height=height, feat_width=width, coord_channels=in_ch)
         self.downCntx2 = ResContextBlock(32, 32)
         self.downCntx3 = ResContextBlock(32, 32)
 
-        # Encoder: 4 stages with (2,4) pooling
         self.resBlock1 = ResBlock(32, 2 * 32, 0.2, pooling=True, drop_out=False, kernel_size=(2, 4))
         self.resBlock2 = ResBlock(2 * 32, 2 * 2 * 32, 0.2, pooling=True, kernel_size=(2, 4))
         self.resBlock3 = ResBlock(2 * 2 * 32, 2 * 4 * 32, 0.2, pooling=True, kernel_size=(2, 4))
         self.resBlock4 = ResBlock(2 * 4 * 32, 2 * 4 * 32, 0.2, pooling=True, kernel_size=(2, 4))
 
-        # Decoder: 3 UpBlocks with PixelShuffle(2,4) + skip connections
         self.upBlock1 = UpBlock(2 * 4 * 32, 4 * 32, 0.2)
         self.upBlock2 = UpBlock(4 * 32, 2 * 32, 0.2)
         self.upBlock3 = UpBlock(2 * 32, 32, 0.2, drop_out=False)
-
-        # Movable logits
         self.logits = nn.Conv2d(32, out_ch, kernel_size=(1, 1))
 
     def forward(self, rv_input):
-        # rv_input: [B, 5, 64, 2048]
         B = rv_input.size(0)
         self.metaConv.update_num_batch(B)
 
-        # 1. Context with MetaKernel geometry-awareness
-        x = self.downCntx(rv_input)  # [B, 32, 64, 2048]
-        x = self.metaConv(
-            data=x, coord_data=rv_input, data_channels=x.size(1), coord_channels=rv_input.size(1), kernel_size=3
-        )  # [B, 32, 64, 2048]
-        x = self.downCntx2(x)  # [B, 32, 64, 2048]
-        x = self.downCntx3(x)  # [B, 32, 64, 2048]
+        x = self.downCntx(rv_input)
+        x = self.metaConv(data=x, coord_data=rv_input, data_channels=x.size(1), coord_channels=rv_input.size(1), kernel_size=3)
+        x = self.downCntx2(x)
+        x = self.downCntx3(x)
 
-        # 2. Encoder
-        down0c, down0b = self.resBlock1(x)  # [B, 64, 32, 512],  skip: [B, 64, 64, 2048]
-        down1c, down1b = self.resBlock2(down0c)  # [B, 128, 16, 128], skip: [B, 128, 32, 512]
-        down2c, down2b = self.resBlock3(down1c)  # [B, 256, 8, 32],   skip: [B, 256, 16, 128]
-        down3c, down3b = self.resBlock4(down2c)  # [B, 256, 4, 8],    skip: [B, 256, 8, 32]
+        down0c, down0b = self.resBlock1(x)
+        down1c, down1b = self.resBlock2(down0c)
+        down2c, down2b = self.resBlock3(down1c)
+        down3c, down3b = self.resBlock4(down2c)
 
-        # 3. Decoder with skip connections
-        up3 = self.upBlock1(down3b, down2b)  # [B, 128, 16, 128]
-        up2 = self.upBlock2(up3, down1b)  # [B, 64, 32, 512]
-        up1 = self.upBlock3(up2, down0b)  # [B, 32, 64, 2048]
+        up3 = self.upBlock1(down3b, down2b)
+        up2 = self.upBlock2(up3, down1b)
+        up1 = self.upBlock3(up2, down0b)
 
-        # 4. Movable logits (raw — softmax는 loss에서 적용)
-        logits = self.logits(up1)  # [B, out_ch, 64, 2048]
+        logits = self.logits(up1)
         return logits

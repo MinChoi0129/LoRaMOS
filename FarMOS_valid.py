@@ -41,7 +41,7 @@ def run_predict(args, model, task_cfg, loader, desc):
     with torch.no_grad():
         for batch in tqdm(loader, desc=desc, dynamic_ncols=True):
             if args.mode == "val":
-                pcd_input, rv_input, bev_coord, rv_coord, _, _, _, num_valid, seq_ids, file_ids = batch
+                pcd_input, rv_input, bev_coord, rv_coord, _, _, _, _, num_valid, seq_ids, file_ids = batch
             else:
                 pcd_input, rv_input, bev_coord, rv_coord, num_valid, seq_ids, file_ids = batch
 
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     print(f"Loaded checkpoint: {args.checkpoint} (epoch {ckpt['epoch']})")
 
     if args.mode == "val":
-        loader = build_val_loader(args.sequence_dir, args.num_workers)
+        loader = build_val_loader(args.sequence_dir, args.config, args.num_workers)
         run_predict(args, model, task_cfg, loader, "Predicting (val)")
     elif args.mode == "test":
         for seq_num in task_cfg["split"]["test"]:

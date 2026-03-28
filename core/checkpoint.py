@@ -65,6 +65,13 @@ def save_all_best_checkpoints(model, optimizer, scheduler, epoch, ckpt_dir, val,
     for rmin, rmax in range_bins:
         key = f"{rmin}_{rmax}m"
         best_ious[key] = save_best_checkpoint(
-            model, optimizer, scheduler, epoch, ckpt_dir,
-            val[f"iou_moving_{rmin}_{rmax}m"], best_ious[key], logger, tag=f"best_{key}"
+            model,
+            optimizer,
+            scheduler,
+            epoch,
+            ckpt_dir,
+            val[f"iou_moving_{rmin}_{rmax}m"],
+            best_ious[key],
+            logger,
+            tag=f"best_{key}",
         )
