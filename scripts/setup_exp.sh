@@ -1,6 +1,6 @@
 #!/bin/bash
 # Setup Exp36 directory structure for first-time users.
-# Creates logs/Exp36/ with code snapshot and moves best_80.pth into checkpoints/.
+# Creates logs/Exp36/ with code snapshot and reassembles split checkpoint.
 
 set -e
 
@@ -15,16 +15,28 @@ if [ -d "${LOG_DIR}" ]; then
 fi
 
 # Create experiment directory and run code snapshot
-echo "[1/2] Creating ${LOG_DIR} and snapshotting code..."
+echo "[1/3] Creating ${LOG_DIR} and snapshotting code..."
 python -c "from core.builder import snapshot_code; snapshot_code('${LOG_DIR}')"
 mkdir -p "${LOG_DIR}/checkpoints"
 
-# Move checkpoint
+# Reassemble split checkpoint if needed
+if [ ! -f "${CKPT_SRC}" ]; then
+    if ls ${CKPT_SRC}.part* 1>/dev/null 2>&1; then
+        echo "[2/3] Reassembling ${CKPT_SRC} from split parts..."
+        cat ${CKPT_SRC}.part* > "${CKPT_SRC}"
+    else
+        echo "[2/3] ${CKPT_SRC} and split parts not found, skipping."
+    fi
+else
+    echo "[2/3] ${CKPT_SRC} already exists."
+fi
+
+# Copy checkpoint
 if [ -f "${CKPT_SRC}" ]; then
-    echo "[2/2] Copying ${CKPT_SRC} -> ${CKPT_DST}"
+    echo "[3/3] Copying ${CKPT_SRC} -> ${CKPT_DST}"
     cp "${CKPT_SRC}" "${CKPT_DST}"
 else
-    echo "[2/2] ${CKPT_SRC} not found in project root, skipping."
+    echo "[3/3] ${CKPT_SRC} not found, skipping."
 fi
 
 echo "Done. ${LOG_DIR} is ready."

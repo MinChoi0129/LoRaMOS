@@ -4,3 +4,4 @@ wandb
 .vscode
 deformattn/build/
 deformattn/*.so
+best_80.pth
