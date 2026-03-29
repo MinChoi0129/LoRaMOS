@@ -1,6 +1,6 @@
 # FarMOS
 
-LiDAR MOS with BEV + RV dual-branch and Deformable Attention for far-range moving object detection.
+LiDAR MOS for far-range moving object detection.
 
 ## Setup
 
