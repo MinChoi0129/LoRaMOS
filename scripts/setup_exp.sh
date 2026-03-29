@@ -24,6 +24,7 @@ if [ ! -f "${CKPT_SRC}" ]; then
     if ls ${CKPT_SRC}.part* 1>/dev/null 2>&1; then
         echo "[2/3] Reassembling ${CKPT_SRC} from split parts..."
         cat ${CKPT_SRC}.part* > "${CKPT_SRC}"
+        rm ${CKPT_SRC}.part*
     else
         echo "[2/3] ${CKPT_SRC} and split parts not found, skipping."
     fi
