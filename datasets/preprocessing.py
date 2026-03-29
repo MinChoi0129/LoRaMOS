@@ -91,7 +91,7 @@ def load_sequence(meta_list, learning_map=None, movable_learning_map=None):
 def pad_to_max(point_clouds, label_list=None, movable_label_list=None):
     valid_point_counts = []
     has_labels = label_list is not None
-    has_movable = movable_label_list != []
+    has_movable = bool(movable_label_list)
 
     for t in range(len(point_clouds)):
         num_valid = point_clouds[t].shape[0]
