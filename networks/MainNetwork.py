@@ -106,25 +106,37 @@ class FarMOS(nn.Module):
         moving_feat_3d = unproject(moving_feat_bev, bev_coord[:, -1], scale=1.0)  # [B, 32, N, 1]
         moving_logit_3d = self.point_fuse(pcd_feat_t0, moving_feat_3d, movable_logit_as_3d.detach())  # [B, 3, N, 1]
 
+        if self.training:
+            visualization = None
+        else:
+            xyz_t0 = pcd_input[:, -1, :3, :, 0]  # [B, 3, N]
+            visualization = [
+                (bev_input, "feat_pcd_bev"),
+                (project(pcd_feat_t0, bev_coord[:, -1], view="bev"), "feat_pcd_bev_t0"),
+                (moving_feat_bev, "feat_moving_bev"),
+                (movable_mask_bev, "mask_movable_bev"),
+                (
+                    project(moving_logit_3d.argmax(dim=1, keepdim=True).float(), bev_coord[:, -1], view="bev"),
+                    "pred_moving_bev",
+                ),
+                (movable_logit_rv.argmax(dim=1, keepdim=True).float(), "pred_movable_rv"),
+                (movable_logit_as_bev.argmax(dim=1, keepdim=True).float(), "pred_movable_bev"),
+                # 3D point cloud visualizations: (xyz, value, name) tuples
+                (pcd_input[:, :, :3, :, 0].permute(0, 2, 1, 3).contiguous().view(B, 3, T * N),
+                     pcd_feat.view(B, T, self.pointnet_ch, N).permute(0, 2, 1, 3).contiguous().view(B, self.pointnet_ch, T * N),
+                     "feat_pcd_3d_all"),
+                (xyz_t0, pcd_feat_t0[:, :, :, 0], "feat_pcd_3d"),
+                (xyz_t0, moving_feat_3d[:, :, :, 0], "feat_moving_3d"),
+                (xyz_t0, moving_logit_3d[:, :, :, 0], "logit_moving_3d"),
+                (xyz_t0, movable_logit_as_3d[:, :, :, 0], "logit_movable_3d"),
+                (xyz_t0, moving_logit_3d.argmax(dim=1, keepdim=True).float()[:, :, :, 0], "pred_moving_3d"),
+                (xyz_t0, movable_logit_as_3d.argmax(dim=1, keepdim=True).float()[:, :, :, 0], "pred_movable_3d"),
+            ]
+
         return {
             "moving_logit_3d": moving_logit_3d,
             "movable_logit_2d": movable_logit_rv,
-            "visualization": (
-                None
-                if self.training
-                else [
-                    (bev_input, "feat_pcd_bev"),
-                    (project(pcd_feat_t0, bev_coord[:, -1], view="bev"), "feat_pcd_bev_t0"),
-                    (moving_feat_bev, "feat_moving_bev"),
-                    (movable_mask_bev, "mask_movable_bev"),
-                    (
-                        project(moving_logit_3d.argmax(dim=1, keepdim=True).float(), bev_coord[:, -1], view="bev"),
-                        "pred_moving_bev",
-                    ),
-                    (movable_logit_rv.argmax(dim=1, keepdim=True).float(), "pred_movable_rv"),
-                    (movable_logit_as_bev.argmax(dim=1, keepdim=True).float(), "pred_movable_bev"),
-                ]
-            ),
+            "visualization": visualization,
         }
 
     def forward(

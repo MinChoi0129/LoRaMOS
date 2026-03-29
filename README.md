@@ -26,6 +26,17 @@ Intensity is auto-normalized to [0,1] at load time (values >1.0 are divided by 2
 
 Set `sequence_dir` in `config/train.yaml`.
 
+## Pretrained Model Setup
+
+After cloning, run the following to set up the experiment directory with code snapshot and checkpoint:
+
+```bash
+bash scripts/setup_exp.sh
+```
+
+This creates `logs/Exp36/` with a code snapshot and moves `best_80.pth` into `logs/Exp36/checkpoints/`.
+Only needs to be run once after cloning. Prediction, evaluation, and visualization scripts require this directory.
+
 ## Training
 
 ```bash
@@ -62,4 +73,4 @@ bash scripts/speed.sh
 bash scripts/visualize.sh
 ```
 
-Saves intermediate features and predictions as PNGs to `images/`.
+Saves intermediate features and predictions to `visualization/2d/` (PNG) and `visualization/3d/` (NPY).

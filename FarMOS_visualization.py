@@ -55,6 +55,5 @@ if __name__ == "__main__":
         print("Label saved.")
 
         output = model.infer(pcd_input, rv_input, bev_coord, rv_coord)
-        tensors, names = zip(*output["visualization"])
-        save_feature_as_img(list(tensors), list(names), "max")
+        save_feature_as_img(output["visualization"], channel_pool="max")
         print("Feature saved.")
