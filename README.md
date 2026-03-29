@@ -74,3 +74,5 @@ bash scripts/visualize.sh
 ```
 
 Saves intermediate features and predictions to `visualization/2d/` (PNG) and `visualization/3d/` (NPY).
+
+To visualize npy files, follow https://github.com/MinChoi0129/MOS_visualizer.git
