@@ -2,6 +2,7 @@ __pycache__
 logs
 wandb
 .vscode
+.claude
 deformattn/build/
 deformattn/*.so
 best_80.pth
