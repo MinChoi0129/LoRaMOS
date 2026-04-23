@@ -8,7 +8,7 @@ CHECKPOINT="logs/Exp36/checkpoints/best_80.pth"
 # ============================================================
 SEQUENCE_DIR="/home/ssd_data/ROOT_Apollo/sequences/"
 
-python LoRaMOS_visualization.py \
+python LoRaMOS_viz_file.py \
     --sequence_dir ${SEQUENCE_DIR} \
     --config config/apollo-mos.yaml \
     --mode test \
