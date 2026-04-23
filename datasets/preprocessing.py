@@ -23,11 +23,11 @@ from datasets.pointcloud import (
     generate_rv_features,
     generate_rv_label,
 )
-from core.pretty_printer_and_saver import shprint
+# from core.pretty_printer_and_saver import shprint  # Debug shape printer
 
 
 def build_sequence_filelist(sequence_dir, seq_id, poses, include_labels=True):
-    """T프레임씩 묶은 메타 리스트 구축. 순서: [t-(T-1), ..., t-1, t0]"""
+    # Build T-frame meta list, ordered [t-(T-1), ..., t-1, t0]
     seq_path = os.path.join(sequence_dir, seq_id)
     velodyne_path = os.path.join(seq_path, "velodyne")
     labels_path = os.path.join(seq_path, "labels")

@@ -4,12 +4,12 @@ import torch.nn.functional as F
 import yaml
 from networks import backbone_moving, loss, SubNetworks
 from core.projector_unprojector import project, unproject
-from datasets.config import NUM_TEMPORAL_FRAMES
+from datasets.config import NUM_TEMPORAL_FRAMES, RANGE_BINS
 
 
-class FarMOS(nn.Module):
+class LoRaMOS(nn.Module):
     def __init__(self):
-        super(FarMOS, self).__init__()
+        super(LoRaMOS, self).__init__()
 
         self._build_network()
         self._build_loss()
@@ -64,8 +64,6 @@ class FarMOS(nn.Module):
 
     @staticmethod
     def _range_balanced_sample(pred, label, dist, samples_per_bin=4000):
-        from datasets.config import RANGE_BINS
-
         B = pred.shape[0]
         all_preds, all_labels = [], []
 
@@ -121,7 +119,7 @@ class FarMOS(nn.Module):
                 ),
                 (movable_logit_rv.argmax(dim=1, keepdim=True).float(), "pred_movable_rv"),
                 (movable_logit_as_bev.argmax(dim=1, keepdim=True).float(), "pred_movable_bev"),
-                # 3D point cloud visualizations: (xyz, value, name) tuples
+                # 3D point cloud viz: (xyz, value, name)
                 (pcd_input[:, :, :3, :, 0].permute(0, 2, 1, 3).contiguous().view(B, 3, T * N),
                      pcd_feat.view(B, T, self.pointnet_ch, N).permute(0, 2, 1, 3).contiguous().view(B, self.pointnet_ch, T * N),
                      "feat_pcd_3d_all"),

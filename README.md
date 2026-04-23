@@ -1,11 +1,11 @@
-# FarMOS
+# LoRaMOS
 
 LiDAR MOS for far-range moving object detection.
 
 ## Setup
 
 ```bash
-conda create -n farmos python=3.9 -y && conda activate farmos
+conda create -n loramos python=3.9 -y && conda activate loramos
 pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 

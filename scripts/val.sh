@@ -1,5 +1,5 @@
 #!/bin/bash
-# FarMOS Prediction - SemanticKITTI
+# LoRaMOS Prediction - SemanticKITTI
 
 EXP_ID="Exp36"
 MODE="val"  # "val" = seq 08, "test" = seq 11-21
@@ -12,7 +12,7 @@ CHECKPOINT=$(ls logs/${EXP_ID}/checkpoints/best_*.pth | head -1)
 cd "logs/${EXP_ID}/code"
 echo "Checkpoint: ${CHECKPOINT}"
 
-python FarMOS_valid.py \
+python LoRaMOS_valid.py \
     --mode ${MODE} \
     --sequence_dir ${SEQUENCE_DIR} \
     --config ${CONFIG} \

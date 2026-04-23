@@ -1,12 +1,16 @@
+import copy
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from deformattn.modules import MSDeformAttn
 
 act_layer = nn.ReLU(inplace=True)
 
 
 def conv3x3(in_planes, out_planes, stride=1, dilation=1, bias=False):
-    """3x3 convolution with padding"""
+    # 3x3 conv with padding
     return nn.Conv2d(
         in_planes,
         out_planes,
@@ -21,7 +25,6 @@ def conv3x3(in_planes, out_planes, stride=1, dilation=1, bias=False):
 class DownSample2D(nn.Module):
     def __init__(self, in_planes, out_planes, stride=1):
         super(DownSample2D, self).__init__()
-        # self.in_planes, self.out_planes = in_planes, out_planes
         self.conv_branch = nn.Sequential(
             conv3x3(in_planes, out_planes, stride=stride, dilation=1),
             nn.BatchNorm2d(out_planes),
@@ -128,7 +131,6 @@ class ChannelAtt(nn.Module):
         )
 
     def forward(self, x):
-        # channel wise
         ca_map = self.cnet(x)
         x = x * ca_map
         return x
@@ -146,7 +148,6 @@ class SpatialAtt(nn.Module):
         )
 
     def forward(self, x):
-        # spatial wise
         sa_map = self.snet(x)
         x = x * sa_map
         return x
@@ -159,7 +160,6 @@ class CSAtt(nn.Module):
         self.spatial_att = SpatialAtt(channels, reduction)
 
     def forward(self, x):
-        # channel wise
         x1 = self.channel_att(x)
         x2 = self.spatial_att(x1)
         return x2
@@ -431,7 +431,7 @@ class PointAttFusion(nn.Module):
             nn.Conv2d(out_channel, len(self.in_channel_list), kernel_size=1, padding=0),
         )
 
-        # make feature layer
+        # Feature layer
         self.feat_model = nn.ModuleList()
         for i, in_channel in enumerate(self.in_channel_list):
             self.feat_model.append(PointNet(cin=in_channel, cout=out_channel, pre_bn=False))
@@ -441,26 +441,22 @@ class PointAttFusion(nn.Module):
 
         x_feat_list = [self.feat_model[i](x_list[i]) for i in range(len(x_list))]
 
-        x_merge = torch.stack(x_feat_list, dim=1)  # (BS, S, channels, N, 1)
+        x_merge = torch.stack(x_feat_list, dim=1)  # [BS, S, C, N, 1]
         x_merge = F.dropout(x_merge, p=0.2, training=self.training, inplace=False)
 
         ca_map = self.att_layer(x_merge.view(batch_size, len(self.in_channel_list) * self.out_channel, -1, 1))
-        ca_map = ca_map.view(batch_size, len(self.in_channel_list), 1, -1, 1)  # (BS, S, 1, N, 1)
-        ca_map = F.softmax(ca_map, dim=1)  # (BS, S, 1, N, 1)
+        ca_map = ca_map.view(batch_size, len(self.in_channel_list), 1, -1, 1)  # [BS, S, 1, N, 1]
+        ca_map = F.softmax(ca_map, dim=1)  # [BS, S, 1, N, 1]
 
-        x_out = (x_merge * ca_map).sum(dim=1)  # (BS, channels, N, 1)
+        x_out = (x_merge * ca_map).sum(dim=1)  # [BS, C, N, 1]
         return x_out
 
 
 class DeformAttnBottleneck(nn.Module):
-    """Deformable Attention bottleneck for BEV feature refinement.
-    Projects input to d_model, applies multi-layer deformable attention, projects back."""
-
+    # Deformable attention bottleneck for BEV refinement
+    # Projects to d_model, runs N deformable-attn layers, projects back
     def __init__(self, in_channels, d_model=128, d_ffn=512, n_heads=4, n_points=4, num_layers=2):
         super(DeformAttnBottleneck, self).__init__()
-        from deformattn.modules import MSDeformAttn
-        import copy
-
         self.d_model = d_model
         self.proj_in = nn.Sequential(
             nn.Conv2d(in_channels, d_model, 1, bias=False),
@@ -480,8 +476,6 @@ class DeformAttnBottleneck(nn.Module):
         )
 
     def _build_layer(self, d_model, d_ffn, n_heads, n_points):
-        from deformattn.modules import MSDeformAttn
-
         return _DeformAttnLayer(d_model, d_ffn, n_heads, n_points)
 
     def forward(self, x):
@@ -515,12 +509,9 @@ class DeformAttnBottleneck(nn.Module):
 
 
 class _DeformAttnLayer(nn.Module):
-    """Single deformable cross-attention + FFN layer."""
-
+    # Single deformable cross-attention + FFN layer
     def __init__(self, d_model, d_ffn, n_heads, n_points):
         super(_DeformAttnLayer, self).__init__()
-        from deformattn.modules import MSDeformAttn
-
         self.cross_attn = MSDeformAttn(d_model, n_levels=1, n_heads=n_heads, n_points=n_points)
         self.norm1 = nn.LayerNorm(d_model)
         self.linear1 = nn.Linear(d_model, d_ffn)
@@ -545,8 +536,8 @@ class BilinearSample(nn.Module):
         H = grid_feat.shape[2]
         W = grid_feat.shape[3]
 
-        grid_sample_x = (2 * grid_coord[:, :, 0] * self.scale_rate[1] / (W - 1)) - 1  # x 에는 0번 인덱스
-        grid_sample_y = (2 * grid_coord[:, :, 1] * self.scale_rate[0] / (H - 1)) - 1  # y 에는 1번 인덱스
+        grid_sample_x = (2 * grid_coord[:, :, 0] * self.scale_rate[1] / (W - 1)) - 1  # x uses index 0
+        grid_sample_y = (2 * grid_coord[:, :, 1] * self.scale_rate[0] / (H - 1)) - 1  # y uses index 1
 
         grid_sample_2 = torch.stack((grid_sample_x, grid_sample_y), dim=-1)
         pc_feat = F.grid_sample(grid_feat, grid_sample_2, mode="bilinear", padding_mode="zeros", align_corners=True)

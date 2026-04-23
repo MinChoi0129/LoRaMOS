@@ -6,8 +6,7 @@ from networks.backbone_movable import MetaKernel, ResContextBlock, ResBlock, UpB
 
 
 class MovingNet(nn.Module):
-    """Cartesian BEV Encoder-Decoder (Feature Pyramid + DeformAttn)."""
-
+    # Cartesian BEV encoder-decoder (feature pyramid + deformable attention)
     def __init__(self, in_channels):
         super(MovingNet, self).__init__()
         block = backbone_moving.BasicBlock

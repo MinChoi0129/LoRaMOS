@@ -168,7 +168,7 @@ class SequenceCopyPaste:
         if len(obj_list[0][0]) < 10:
             return point_clouds, label_list, movable_label_list
 
-        # MAX_POINTS 초과 방지
+        # Prevent exceeding MAX_POINTS
         max_current = max(pc.shape[0] for pc in point_clouds)
         if max_current + len(obj_list[0][0]) > MAX_POINTS:
             return point_clouds, label_list, movable_label_list

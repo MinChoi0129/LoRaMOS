@@ -1,5 +1,5 @@
 #!/bin/bash
-# FarMOS Prediction - Apollo
+# LoRaMOS Prediction - Apollo
 
 EXP_ID="Exp36"
 
@@ -11,7 +11,7 @@ CHECKPOINT=$(ls logs/${EXP_ID}/checkpoints/best_*.pth | head -1)
 cd "logs/${EXP_ID}/code"
 echo "Checkpoint: ${CHECKPOINT}"
 
-python FarMOS_valid.py \
+python LoRaMOS_valid.py \
     --mode test \
     --sequence_dir ${SEQUENCE_DIR} \
     --config ${CONFIG} \

@@ -1,6 +1,6 @@
 import argparse
 import torch
-from networks.MainNetwork import FarMOS
+from networks.MainNetwork import LoRaMOS
 from datasets.dataloader import DataloadVal, DataloadTest
 from core.checkpoint import load_checkpoint
 from core.projector_unprojector import project
@@ -8,7 +8,7 @@ from core.pretty_printer_and_saver import save_feature_as_img
 
 
 def get_args():
-    parser = argparse.ArgumentParser("FarMOS Visualization")
+    parser = argparse.ArgumentParser("LoRaMOS Visualization")
     parser.add_argument("--sequence_dir", type=str, required=True)
     parser.add_argument("--config", type=str, default="config/semantic-kitti-mos.yaml")
     parser.add_argument("--mode", type=str, default="val", choices=["val", "test"])
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     args = get_args()
     device = torch.device("cuda")
 
-    model = FarMOS().to(device)
+    model = LoRaMOS().to(device)
     model.eval()
     try:
         ckpt = load_checkpoint(model, args.checkpoint)
@@ -45,18 +45,17 @@ if __name__ == "__main__":
 
             save_feature_as_img(
                 [
-                    moving_label_bev,
-                    moving_label_rv,
-                    label_movable_rv.unsqueeze(1).float(),
-                    label_moving_bev.unsqueeze(1).float(),
-                    movable_label_bev,
+                    (moving_label_bev, "GT_moving_bev"),
+                    (moving_label_rv, "GT_moving_rv"),
+                    (label_movable_rv.unsqueeze(1).float(), "GT_movable_rv"),
+                    (label_moving_bev.unsqueeze(1).float(), "GT_moving_2d_bev"),
+                    (movable_label_bev, "GT_movable_bev"),
                 ],
-                ["GT_moving_bev", "GT_moving_rv", "GT_movable_rv", "GT_moving_2d_bev", "GT_movable_bev"],
-                "max",
+                channel_pool="max",
             )
             print("Label saved.")
 
-        else:  # test
+        else:  # Test split
             dataset = DataloadTest(args.sequence_dir, args.seq_id)
             sample = dataset[args.frame_id]
             pcd_input, rv_input, bev_coord, rv_coord = [

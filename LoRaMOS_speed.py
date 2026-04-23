@@ -3,12 +3,12 @@ import torch
 import numpy as np
 import time
 from tqdm import tqdm
-from networks.MainNetwork import FarMOS
+from networks.MainNetwork import LoRaMOS
 from datasets.dataloader import DataloadVal
 
 
 def get_args():
-    parser = argparse.ArgumentParser("FarMOS Speed Benchmark")
+    parser = argparse.ArgumentParser("LoRaMOS Speed Benchmark")
     parser.add_argument("--sequence_dir", type=str, required=True)
     parser.add_argument("--config", type=str, default="config/semantic-kitti-mos.yaml")
     parser.add_argument("--warmup_iters", type=int, default=50)
@@ -26,7 +26,7 @@ if __name__ == "__main__":
     bev_coord = bev_coord.unsqueeze(0).to(device)
     rv_coord = rv_coord.unsqueeze(0).to(device)
 
-    model = FarMOS().to(device)
+    model = LoRaMOS().to(device)
     model.eval()
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

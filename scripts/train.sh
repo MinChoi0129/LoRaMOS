@@ -1,5 +1,5 @@
 #!/bin/bash
-# FarMOS Training
+# LoRaMOS Training
 
 MODE="new"          # "new" = from scratch, "keep" = resume
 RESUME_EXP="Exp37"  # used when MODE="keep"
@@ -20,7 +20,7 @@ elif [ "${MODE}" = "keep" ]; then
     echo "=== Resuming experiment: ${EXP_ID} ==="
 fi
 
-clear && python FarMOS_train.py \
+clear && python LoRaMOS_train.py \
     --train_config ${TRAIN_CONFIG} \
     --log_dir ${LOG_DIR} \
     --wandb_name ${EXP_ID} \

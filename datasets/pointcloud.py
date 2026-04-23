@@ -1,5 +1,7 @@
 import numpy as np
 
+from datasets.config import BEV_WARP_ALPHA
+
 
 def parse_calibration(filename):
     calibration = {}
@@ -49,8 +51,7 @@ def relabel(raw_labels, label_map):
 
 
 def quantize_cartesian(points_xyzi, range_x, range_y, range_z, grid_size, alpha=None):
-    """Log-Radial Warped Cartesian BEV 양자화. Returns: [N, 3] — [col, row, depth]"""
-    from datasets.config import BEV_WARP_ALPHA
+    # Log-radial warped Cartesian BEV quantization -> [N, 3] (col, row, depth)
     height, width, depth = grid_size
     alpha = alpha if alpha is not None else BEV_WARP_ALPHA
     r_max = max(abs(range_x[0]), abs(range_x[1]))  # 50m
@@ -59,9 +60,9 @@ def quantize_cartesian(points_xyzi, range_x, range_y, range_z, grid_size, alpha=
     y = points_xyzi[:, 1].copy()
     z = points_xyzi[:, 2].copy()
 
-    if alpha > 0:
-        r = np.sqrt(x ** 2 + y ** 2) + 1e-12
-        warp_factor = alpha * np.log(1.0 + r / alpha) / r  # → 1.0 at r→0
+    if alpha != 0:
+        r = np.sqrt(x**2 + y**2) + 1e-12
+        warp_factor = alpha * np.log(1.0 + r / alpha) / r  # -> 1.0 as r -> 0
         x_warped = x * warp_factor
         y_warped = y * warp_factor
         range_warped = alpha * np.log(1.0 + r_max / alpha)
@@ -80,7 +81,7 @@ def quantize_cartesian(points_xyzi, range_x, range_y, range_z, grid_size, alpha=
 
 
 def quantize_spherical(points_xyzi, phi_range, theta_range, r_range, grid_size):
-    """구면 격자 양자화. Returns: [N, 3] — [col(phi), row(theta), depth(r)]"""
+    # Spherical grid quantization -> [N, 3] (col=phi, row=theta, depth=r)
     height, width, depth = grid_size
 
     phi_rad_min = np.radians(phi_range[0])
@@ -107,7 +108,7 @@ def quantize_spherical(points_xyzi, phi_range, theta_range, r_range, grid_size):
 
 
 def make_point_features(points_xyzi, cartesian_coords):
-    """7채널 피쳐: [x, y, z, intensity, distance, diff_x, diff_y]"""
+    # 7-channel feature: [x, y, z, intensity, distance, diff_x, diff_y]
     x = points_xyzi[:, 0].copy()
     y = points_xyzi[:, 1].copy()
     z = points_xyzi[:, 2].copy()
@@ -119,7 +120,7 @@ def make_point_features(points_xyzi, cartesian_coords):
 
 
 def generate_rv_label(spherical_coord_t0, label_t0, rv_height, rv_width):
-    """3D label -> RV 2D label (Painter's algorithm)"""
+    # 3D label -> RV 2D label (painter's algorithm)
     label_2d = np.zeros((rv_height, rv_width), dtype=np.int64)
 
     phi_idx = np.floor(spherical_coord_t0[:, 0]).astype(np.int64)
@@ -137,7 +138,7 @@ def generate_rv_label(spherical_coord_t0, label_t0, rv_height, rv_width):
 
 
 def generate_rv_features(points_xyzi_t0, spherical_coord_t0, rv_height, rv_width):
-    """3D points -> RV 2D feature map [5, H, W] (Painter's algorithm)"""
+    # 3D points -> RV 2D feature map [5, H, W] (painter's algorithm)
     rv_features = np.zeros((5, rv_height, rv_width), dtype=np.float32)
 
     phi_idx = np.floor(spherical_coord_t0[:, 0]).astype(np.int64)

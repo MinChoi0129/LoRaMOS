@@ -8,7 +8,7 @@ from core.metrics import iouEval
 
 
 def get_args():
-    parser = argparse.ArgumentParser("FarMOS Evaluation (pred vs GT)")
+    parser = argparse.ArgumentParser("LoRaMOS Evaluation (pred vs GT)")
     parser.add_argument("--sequence_dir", type=str, required=True)
     parser.add_argument("--pred_dir", type=str, required=True)
     parser.add_argument("--config", type=str, default="config/semantic-kitti-mos.yaml")
@@ -36,7 +36,6 @@ def evaluate(args, task_cfg):
     ignore = [cl for cl, ign in task_cfg["learning_ignore"].items() if ign]
     n_classes = len(task_cfg["learning_map_inv"])
 
-    # Range bins
     range_bins = [(i, i + args.range_step) for i in range(0, args.range_max, args.range_step)]
 
     overall_eval = iouEval(n_classes, ignore)
@@ -70,7 +69,6 @@ def evaluate(args, task_cfg):
                 if mask.any():
                     reval.addBatch(pred[mask], gt[mask])
 
-    # Print results
     _, overall_iou = overall_eval.getIoU()
     name = {1: "static", 2: "moving"}
 

@@ -2,7 +2,7 @@ sequence_dir: "/home/ssd_data/ROOT_KITTI/KITTI/dataset/sequences/"
 dataset_config: "config/semantic-kitti-mos.yaml"
 batch_size: 4
 num_workers: 8
-wandb_project: "FarMOS"
+wandb_project: "LoRaMOS"
 
 optimizer: "sgd"
 lr: 0.02

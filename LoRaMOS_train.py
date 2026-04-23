@@ -7,7 +7,7 @@ import torch
 warnings.filterwarnings("ignore", message=".*Online softmax.*")
 from tqdm import tqdm
 
-from networks.MainNetwork import FarMOS
+from networks.MainNetwork import LoRaMOS
 from datasets.config import RANGE_BINS
 from core.metrics import validate
 from core.logger import Logger, init_wandb, log_epoch
@@ -22,7 +22,7 @@ from core.builder import (
 
 
 def get_args():
-    parser = argparse.ArgumentParser("FarMOS Training")
+    parser = argparse.ArgumentParser("LoRaMOS Training")
     parser.add_argument("--train_config", type=str, default="config/train.yaml")
     parser.add_argument("--log_dir", type=str, required=True)
     parser.add_argument("--wandb_name", type=str, default=None)
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     train_loader = build_train_loader(cfg)
     val_loader = build_val_loader(cfg["sequence_dir"], cfg["dataset_config"], cfg["num_workers"])
 
-    model = FarMOS().cuda()
+    model = LoRaMOS().cuda()
     model = torch.compile(model)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.log(f"Total Trainable parameters: {num_params:,}")

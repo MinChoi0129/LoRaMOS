@@ -1,4 +1,5 @@
 from functools import partial
+import math
 import os
 import shutil
 import torch
@@ -29,8 +30,6 @@ def build_scheduler(cfg, optimizer):
     if name == "cosine":
         return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg["epochs"])
     elif name == "step":
-        import math
-
         num_epoch = cfg["epochs"] - cfg["begin_epoch"]
 
         def schedule_with_warmup(epoch, num_epoch, pct_start, step, decay_factor):

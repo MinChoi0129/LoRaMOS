@@ -1,14 +1,14 @@
 #!/bin/bash
-# FarMOS Visualization - Apollo
+# LoRaMOS Visualization - Apollo
 
 SEQ_ID=0
 FRAME_ID=1580
-CHECKPOINT="/home/work/FarMOS/logs/Exp36/checkpoints/best_80.pth"
+CHECKPOINT="logs/Exp36/checkpoints/best_80.pth"
 
 # ============================================================
 SEQUENCE_DIR="/home/ssd_data/ROOT_Apollo/sequences/"
 
-python FarMOS_visualization.py \
+python LoRaMOS_visualization.py \
     --sequence_dir ${SEQUENCE_DIR} \
     --config config/apollo-mos.yaml \
     --mode test \

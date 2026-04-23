@@ -5,13 +5,13 @@ import yaml
 import torch
 from tqdm import tqdm
 
-from networks.MainNetwork import FarMOS
+from networks.MainNetwork import LoRaMOS
 from core.checkpoint import load_checkpoint
 from core.builder import build_val_loader, build_test_loader
 
 
 def get_args():
-    parser = argparse.ArgumentParser("FarMOS Prediction (save .label files)")
+    parser = argparse.ArgumentParser("LoRaMOS Prediction (save .label files)")
     parser.add_argument("--mode", type=str, required=True, choices=["val", "test"])
     parser.add_argument("--sequence_dir", type=str, required=True)
     parser.add_argument("--config", type=str, default="config/semantic-kitti-mos.yaml")
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     with open(args.config) as f:
         task_cfg = yaml.load(f, Loader=yaml.FullLoader)
 
-    model = FarMOS().cuda()
+    model = LoRaMOS().cuda()
     ckpt = load_checkpoint(model, args.checkpoint)
     print(f"Loaded checkpoint: {args.checkpoint} (epoch {ckpt['epoch']})")
 

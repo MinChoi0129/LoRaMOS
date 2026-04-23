@@ -9,8 +9,8 @@ _VIEW_SIZES = {
 
 
 def project(feat, coord, view="bev", mode="max"):
-    """3D point features -> 2D grid. coord: [col, row] order.
-    feat: [B*T, C, N, 1], coord: [B, T, N, 2] or [B, N, 2] -> [B, T*C, H, W]"""
+    # 3D point features -> 2D grid; coord is [col, row]
+    # feat [B*T, C, N, 1], coord [B, T, N, 2] or [B, N, 2] -> [B, T*C, H, W]
     H, W = _VIEW_SIZES[view]
 
     if coord.dim() == 3:
@@ -44,8 +44,8 @@ def project(feat, coord, view="bev", mode="max"):
 
 
 def unproject(grid_feat, coord, scale=1.0):
-    """2D grid features -> 3D points via bilinear sampling.
-    grid_feat: [B, C, H, W], coord: [B, N, 2] -> [B, C, N, 1]"""
+    # 2D grid features -> 3D points via bilinear sampling
+    # grid_feat [B, C, H, W], coord [B, N, 2] -> [B, C, N, 1]
     H, W = grid_feat.shape[2], grid_feat.shape[3]
     grid_x = (2 * coord[:, :, 0] * scale / (W - 1)) - 1
     grid_y = (2 * coord[:, :, 1] * scale / (H - 1)) - 1

@@ -8,7 +8,7 @@ BEV_RANGE_X = (-50.0, 50.0)
 BEV_RANGE_Y = (-50.0, 50.0)
 BEV_RANGE_Z = (-4.0, 2.0)
 BEV_GRID_SIZE = (512, 512, 30)  # (H, W, depth)
-BEV_WARP_ALPHA = 5.0  # Log-radial warping 강도 (0이면 균일 Cartesian)
+BEV_WARP_ALPHA = 5.0  # Log-radial warp strength (0 = uniform Cartesian)
 
 RV_RANGE_PHI = (-180.0, 180.0)
 RV_RANGE_THETA = (-25.0, 3.0)
