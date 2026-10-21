@@ -1,6 +1,6 @@
 # LoRa-MOS
 
-**Range-Robust LiDAR Moving Object Segmentation via Logarithmic Spatial Representation and Range-Balanced Learning**
+**Density-Decay-Robust LiDAR Moving Object Segmentation via Logarithmic Spatial Representation and Range-Balanced Learning**
 
 Official implementation of LoRa-MOS. The model targets robust moving-object segmentation at long range by combining a log-radial Cartesian BEV representation with range-balanced training.
 
@@ -106,6 +106,9 @@ If you find our work useful in your research, please consider citing our paper:
   journal={IEEE Robotics and Automation Letters},
   year={2026},
   publisher={IEEE},
-  doi={10.1109/LRA.2026.3742273}
+  issn={2377-3766},
+  doi={10.1109/LRA.2026.3742273},
+  url={https://ieeexplore.ieee.org/document/11731486},
+  note={Early Access}
 }
 ```
