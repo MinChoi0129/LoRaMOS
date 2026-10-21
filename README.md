@@ -4,6 +4,8 @@
 
 Official implementation of LoRa-MOS. The model targets robust moving-object segmentation at long range by combining a log-radial Cartesian BEV representation with range-balanced training.
 
+[![Paper](https://img.shields.io/badge/IEEE-Paper-00629B?style=flat&logo=ieee&logoColor=white)](https://ieeexplore.ieee.org/document/11731486)
+
 ---
 
 ## Setup
@@ -92,3 +94,18 @@ bash scripts/viz_rerun.sh
 Streams predictions and the corresponding `image_2` camera frame to a Rerun web viewer over gRPC. The script prints a URL of the form `http://localhost:9090/?url=...`; open it in a browser on the host. Forward both ports (`9090` for the web viewer, `9876` for gRPC) from your container or remote host.
 
 Requires `rerun-sdk` (already listed in `requirements.txt`).
+
+## Citation
+
+If you find our work useful in your research, please consider citing our paper:
+
+```bibtex
+@article{lee2026loramos,
+  title={LoRa-MOS: Density-Decay-Robust LiDAR Moving Object Segmentation via Logarithmic Spatial Representation and Range-Balanced Learning},
+  author={Lee, Minjae and Bae, Jiho and Kim, Jongmin and Kim, Gun-Woo and Lee, Suwon},
+  journal={IEEE Robotics and Automation Letters},
+  year={2026},
+  publisher={IEEE},
+  doi={10.1109/LRA.2026.3742273}
+}
+```
